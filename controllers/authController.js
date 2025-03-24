@@ -1,29 +1,39 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 
 // Register user
 exports.register = async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
+    const { name, email, password, role } = req.body;
 
     const user = await User.create({
-      username,
+      name,
       email,
-      password,
+      password, // Will be auto-hashed by the model middleware
       role: role || 'staff'
     });
 
-    // Create JWT
+    // Generate JWT
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    res.status(201).json({ token });
+    // Omit password in response
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: userResponse
+    });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({
+      success: false,
+      error: err.message
+    });
   }
 };
 
@@ -31,20 +41,49 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    // Find user and explicitly select password
+    const user = await User.findOne({ email }).select('+password');
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
     }
 
+    // Use model method to compare passwords
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+
+    // Generate JWT
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    res.json({ token });
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Omit password in response
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: userResponse
+    });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({
+      success: false,
+      error: err.message
+    });
   }
 };

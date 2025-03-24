@@ -41,15 +41,21 @@ const userSchema = new mongoose.Schema({
 
 // Password hashing middleware
 userSchema.pre('save', async function(next) {
+  // Only hash if password is modified (or new)
   if (!this.isModified('password')) return next();
 
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
+  try {
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Method to check password validity
-userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
-  return await bcrypt.compare(candidatePassword, userPassword);
+// Method to compare passwords (for login)
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
 const User = mongoose.model('User', userSchema);
