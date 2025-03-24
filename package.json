@@ -2,7 +2,7 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
   "start": "node server.js",
   "dev": "nodemon server.js"

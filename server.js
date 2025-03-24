@@ -5,7 +5,7 @@ const connectDB = require('./config/db');
 
 const app = express();
 
-// CORS
+// CORS Configuration
 const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -14,7 +14,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 
 // Database
@@ -23,10 +22,14 @@ connectDB();
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 
-// Protected Example Route
-app.get('/api/protected', require('../middleware/authJwt').verifyToken, (req, res) => {
-  res.json({ message: 'Protected route accessed' });
-});
+// Protected Route (Fixed Path)
+app.get('/api/protected',
+  require('./middleware/authJwt').verifyToken, // Fixed path
+  (req, res) => {
+    res.json({ message: 'Protected route accessed' });
+  }
+);
 
+// Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
