@@ -40,6 +40,7 @@ connectDB();
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/product', require('./routes/productRoutes'));
 
 // Protected Route
 app.get('/api/protected',

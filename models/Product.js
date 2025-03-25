@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
 
 const productSchema = new mongoose.Schema({
   name: {
@@ -13,7 +14,8 @@ const productSchema = new mongoose.Schema({
   sku: {
     type: String,
     unique: true,
-    trim: true
+    trim: true,
+    default: () => uuidv4()
   },
   category: {
     type: String,
@@ -56,7 +58,15 @@ const productSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
-  }
+  },
+  auditLog: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    action: String,
+    adjustment: Number,
+    note: String,
+    newQuantity: Number,
+    timestamp: { type: Date, default: Date.now }
+  }]
 }, { timestamps: true });
 
 // Indexes for faster querying
