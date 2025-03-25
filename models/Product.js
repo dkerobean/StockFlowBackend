@@ -44,6 +44,12 @@ const productSchema = new mongoose.Schema({
     min: [0, 'Minimum stock cannot be negative'],
     default: 5
   },
+  notifyAt: {  // Custom threshold for notifications
+    type: Number,
+    min: 0,
+    default: function() { return this.minStock; } // Defaults to minStock
+  },
+  lastNotified: Date, // Prevent duplicate alerts
   price: {
     type: Number,
     min: [0, 'Price cannot be negative'],
