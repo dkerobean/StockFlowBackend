@@ -6,6 +6,7 @@ const socketIo = require('socket.io'); // Added for real-time
 const connectDB = require('./config/db');
 const { initSocket } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
+const saleRoutes = require('./routes/saleRoutes');
 
 const app = express();
 
@@ -49,6 +50,7 @@ connectDB();
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/product', require('./routes/productRoutes'));
+app.use('/api/sales', saleRoutes);
 
 
 // Protected Route
