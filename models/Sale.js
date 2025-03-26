@@ -28,7 +28,7 @@ const saleSchema = new mongoose.Schema({
   items: [saleItemSchema],
   subtotal: {
     type: Number,
-    required: true
+    default: 0
   },
   tax: {
     type: Number,
@@ -40,7 +40,7 @@ const saleSchema = new mongoose.Schema({
   },
   total: {
     type: Number,
-    required: true
+    default: 0
   },
   paymentMethod: {
     type: String,
@@ -66,6 +66,21 @@ const saleSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Calculate totals before saving
+
+saleSchema.pre('validate', function(next) {
+  if (this.isNew && this.items) {
+    this.items.forEach(item => {
+      item.price = parseFloat(item.price.toFixed(2));
+    });
+
+    this.subtotal = parseFloat(this.items.reduce((sum, item) =>
+      sum + (item.price * item.quantity * (1 - item.discount/100)), 0).toFixed(2));
+
+    this.total = parseFloat((this.subtotal + this.tax - this.discount).toFixed(2));
+  }
+  next();
+});
+
 saleSchema.pre('save', function(next) {
   this.items.forEach(item => {
     item.price = parseFloat(item.price.toFixed(2));
