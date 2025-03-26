@@ -51,11 +51,12 @@ const productSchema = new mongoose.Schema({
     default: function() { return this.minStock; } // Defaults to minStock
   },
   lastNotified: Date, // Prevent duplicate alerts
-  price: {
-    type: Number,
-    min: [0, 'Price cannot be negative'],
-    required: true
-  },
+ price: {
+  type: Number,
+  min: [0.01, 'Price must be at least 0.01'],
+  required: true,
+  set: v => parseFloat(v.toFixed(2)) // Ensure 2 decimal places
+ },
   barcode: {
     type: String,
     unique: true,
