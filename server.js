@@ -4,8 +4,8 @@ const cors = require('cors');
 const http = require('http'); // Added for Socket.io
 const socketIo = require('socket.io'); // Added for real-time
 const connectDB = require('./config/db');
-const notificationService = require('./services/notificationService');
-const notificationRoutes = require('./routes/notificationRoutes');
+const { initSocket } = require('./socket');
+const { startScheduler } = require('./services/notificationService');
 
 const app = express();
 
@@ -28,8 +28,11 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Start the scheduled nootoficaton checker
-notificationService.startScheduledChecks();
+// Initialize Socket.io
+initSocket(server);
+
+// Start low stock scheduler
+startScheduler();
 
 // Middleware
 app.use(express.json());
@@ -46,7 +49,7 @@ connectDB();
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/product', require('./routes/productRoutes'));
-app.use('/api', notificationRoutes);
+
 
 // Protected Route
 app.get('/api/protected',

@@ -1,26 +1,21 @@
-// routes/notificationRoutes.js
 const express = require('express');
 const router = express.Router();
-const { verifyToken, checkRole } = require('../middleware/authJwt');
 const {
-  checkLowStock,
-  updateNotifyThreshold
+  manualLowStockCheck,
+  updateNotificationSettings
 } = require('../controllers/notificationController');
+const { verifyToken, checkRole } = require('../middleware/authJwt');
 
-// Manual trigger for low stock check
-router.get(
-  '/check-low-stock',
+router.get('/notifications/low-stock-check',
   verifyToken,
   checkRole(['admin']),
-  checkLowStock
+  manualLowStockCheck
 );
 
-// Update notification threshold
-router.patch(
-  '/products/:id/notify-at',
+router.patch('/products/:productId/notification-settings',
   verifyToken,
   checkRole(['admin', 'manager']),
-  updateNotifyThreshold
+  updateNotificationSettings
 );
 
 module.exports = router;

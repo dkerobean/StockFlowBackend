@@ -1,7 +1,7 @@
-// services/notificationService.js
 const Product = require('../models/Product');
 const User = require('../models/User');
-const { sendEmailNotification } = require('./emailService');
+const { sendLowStockEmail } = require('./emailService');
+const { getIO } = require('../socket');
 
 async function checkLowStock() {
   try {
@@ -14,25 +14,54 @@ async function checkLowStock() {
     }).populate('createdBy');
 
     const admins = await User.find({ role: 'admin' });
+    const io = getIO();
 
     await Promise.all(products.map(async (product) => {
-      await sendEmailNotification(product, admins);
+      // Send email notification
+      await sendLowStockEmail(product, admins);
+
+      // Update product record
       product.lastNotified = new Date();
+      product.auditLog.push({
+        user: null, // System-generated
+        action: 'low_stock_notification',
+        details: {
+          recipients: admins.map(a => a.email),
+          quantity: product.quantity,
+          threshold: product.notifyAt
+        }
+      });
       await product.save();
+
+      // Send real-time alert
+      io.emit('low_stock', {
+        productId: product._id,
+        name: product.name,
+        quantity: product.quantity,
+        threshold: product.notifyAt
+      });
     }));
+
+    console.log(`Processed ${products.length} low stock notifications`);
   } catch (error) {
-    console.error('Error in low stock check:', error);
+    console.error('Low stock check failed:', error);
+    throw error;
   }
 }
 
-function startScheduledChecks() {
-  // Run immediately on startup
-  checkLowStock();
-  // Then run every hour
-  setInterval(checkLowStock, 60 * 60 * 1000);
+function startScheduler() {
+  // Initial check
+  checkLowStock().catch(console.error);
+
+  // Hourly checks
+  const interval = setInterval(() => {
+    checkLowStock().catch(console.error);
+  }, 60 * 60 * 1000);
+
+  return interval;
 }
 
 module.exports = {
   checkLowStock,
-  startScheduledChecks
+  startScheduler
 };

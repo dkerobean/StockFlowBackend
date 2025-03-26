@@ -1,25 +1,35 @@
 const nodemailer = require('nodemailer');
+const { compile } = require('handlebars');
+const fs = require('fs');
+const path = require('path');
 
-async function sendEmailNotification(product, recipients) {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
+const transporter = nodemailer.createTransport({
+  service: process.env.EMAIL_SERVICE || 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+const templateSource = fs.readFileSync(
+  path.join(__dirname, 'templates/lowStockAlert.hbs'),
+  'utf8'
+);
+const template = compile(templateSource);
+
+exports.sendLowStockEmail = async (product, recipients) => {
+  const html = template({
+    productName: product.name,
+    currentStock: product.quantity,
+    threshold: product.notifyAt,
+    productLink: `${process.env.CLIENT_URL}/products/${product._id}`,
+    supportEmail: process.env.SUPPORT_EMAIL || 'support@yourapp.com'
   });
 
-  recipients.forEach(async (user) => {
-    await transporter.sendMail({
-      from: 'inventory@yourdomain.com',
-      to: user.email,
-      subject: `Low Stock Alert: ${product.name}`,
-      html: `
-        <p>Product: ${product.name}</p>
-        <p>Current Stock: ${product.quantity}</p>
-        <p>Threshold: ${product.notifyAt}</p>
-        <a href="${process.env.CLIENT_URL}/products/${product._id}">View Product</a>
-      `
-    });
+  await transporter.sendMail({
+    from: `StockFlow Alerts <${process.env.EMAIL_FROM || 'alerts@stockflow.com'}>`,
+    to: recipients.map(u => u.email).join(', '),
+    subject: `Low Stock Alert: ${product.name}`,
+    html
   });
-}
+};

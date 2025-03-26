@@ -1,53 +1,20 @@
-// controllers/notificationController.js
-const Product = require('../models/Product');
-const User = require('../models/User');
+const { checkLowStock } = require('../services/notificationService');
 const asyncHandler = require('express-async-handler');
-const { sendEmailNotification } = require('../services/emailService');
 
-// @desc    Check low stock and send notifications
-// @route   GET /api/products/check-low-stock
-// @access  Admin
-const checkLowStock = asyncHandler(async (req, res) => {
-  const products = await Product.find({
-    $expr: { $lte: ["$quantity", "$notifyAt"] },
-    $or: [
-      { lastNotified: { $exists: false } },
-      { lastNotified: { $lt: new Date(Date.now() - 24*60*60*1000) } }
-    ]
-  }).populate('createdBy');
-
-  const admins = await User.find({ role: 'admin' });
-
-  const notifications = await Promise.all(products.map(async (product) => {
-    await sendEmailNotification(product, admins);
-    product.lastNotified = new Date();
-    await product.save();
-    return {
-      productId: product._id,
-      productName: product.name,
-      currentStock: product.quantity,
-      threshold: product.notifyAt
-    };
-  }));
-
+exports.manualLowStockCheck = asyncHandler(async (req, res) => {
+  await checkLowStock();
   res.json({
-    message: 'Low stock check completed',
-    notifiedProducts: notifications
+    success: true,
+    message: 'Low stock check completed successfully'
   });
 });
 
-// @desc    Update notification threshold
-// @route   PATCH /api/products/:id/notify-at
-// @access  Admin/Manager
-const updateNotifyThreshold = asyncHandler(async (req, res) => {
+exports.updateNotificationSettings = asyncHandler(async (req, res) => {
+  const { productId } = req.params;
   const { notifyAt } = req.body;
 
-  if (notifyAt < 0) {
-    return res.status(400).json({ error: 'Threshold cannot be negative' });
-  }
-
   const product = await Product.findByIdAndUpdate(
-    req.params.id,
+    productId,
     { notifyAt },
     { new: true, runValidators: true }
   );
@@ -56,10 +23,9 @@ const updateNotifyThreshold = asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Product not found' });
   }
 
-  res.json(product);
+  res.json({
+    success: true,
+    message: 'Notification threshold updated',
+    data: product
+  });
 });
-
-module.exports = {
-  checkLowStock,
-  updateNotifyThreshold
-};
