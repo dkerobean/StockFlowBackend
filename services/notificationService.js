@@ -4,26 +4,35 @@ const User = require('../models/User');
 const { sendEmailNotification } = require('./emailService');
 
 async function checkLowStock() {
-  const products = await Product.find({
-    quantity: { $lte: '$notifyAt' },
-    $or: [
-      { lastNotified: { $exists: false } },
-      { lastNotified: { $lt: new Date(Date.now() - 24*60*60*1000) } } // Fixed here
-    ]
-  }).populate('createdBy');
+  try {
+    const products = await Product.find({
+      $expr: { $lte: ["$quantity", "$notifyAt"] },
+      $or: [
+        { lastNotified: { $exists: false } },
+        { lastNotified: { $lt: new Date(Date.now() - 24*60*60*1000) } }
+      ]
+    }).populate('createdBy');
 
-  products.forEach(async (product) => {
     const admins = await User.find({ role: 'admin' });
 
-    // Send notifications (implement your preferred method)
-    sendEmailNotification(product, admins);
-    sendPushNotification(product);
-
-    // Update last notified time
-    product.lastNotified = new Date();
-    await product.save();
-  });
+    await Promise.all(products.map(async (product) => {
+      await sendEmailNotification(product, admins);
+      product.lastNotified = new Date();
+      await product.save();
+    }));
+  } catch (error) {
+    console.error('Error in low stock check:', error);
+  }
 }
 
-// Run every hour
-setInterval(checkLowStock, 60 * 60 * 1000);
+function startScheduledChecks() {
+  // Run immediately on startup
+  checkLowStock();
+  // Then run every hour
+  setInterval(checkLowStock, 60 * 60 * 1000);
+}
+
+module.exports = {
+  checkLowStock,
+  startScheduledChecks
+};
