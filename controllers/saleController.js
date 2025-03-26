@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
+const { emitNewSale } = require('../socket');
 
 // @desc    Create a new sale
 // @route   POST /api/sales
@@ -8,7 +9,6 @@ const Product = require('../models/Product');
 const createSale = asyncHandler(async (req, res) => {
   const { items, paymentMethod, customer, location, notes } = req.body;
 
-  // Validate products and quantities
   await validateSaleItems(items);
 
   const sale = new Sale({
@@ -22,8 +22,8 @@ const createSale = asyncHandler(async (req, res) => {
 
   await sale.save();
 
-  // Emit real-time update
-  req.io.emit('newSale', sale);
+  // Emit real-time updates
+  emitNewSale(sale);
 
   res.status(201).json(sale);
 });
