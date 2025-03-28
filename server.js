@@ -6,7 +6,11 @@ const socketIo = require('socket.io'); // Added for real-time
 const connectDB = require('./config/db');
 const { initSocket } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
+
 const saleRoutes = require('./routes/saleRoutes');
+const incomeRoutes = require('./routes/incomeRoutes');
+const expenseRoutes = require('./routes/expenseRoutes');
+const productRoutes = require('./routes/productRoutes');
 
 const app = express();
 
@@ -31,8 +35,6 @@ app.use(cors(corsOptions));
 
 // Initialize Socket.io
 initSocket(server);
-
-// Start low stock scheduler
 startScheduler();
 
 // Middleware
@@ -49,8 +51,10 @@ connectDB();
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/product', require('./routes/productRoutes'));
+app.use('/api/product', productRoutes);
 app.use('/api/sales', saleRoutes);
+app.use('/api/income', incomeRoutes);
+app.use('/api/expense', expenseRoutes);
 
 
 // Protected Route
