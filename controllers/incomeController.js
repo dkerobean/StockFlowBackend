@@ -85,3 +85,102 @@ exports.getIncomeById = async (req, res) => {
     }
 };
 
+
+// @desc    Update an existing income entry
+// @route   PUT /api/income/:id
+// @access  Private
+exports.updateIncome = async (req, res) => {
+    const { description, amount, date, notes, source } = req.body; // Note: source is generally not recommended to change, especially if 'Sale'
+    const incomeId = req.params.id;
+    const userId = req.user.id;
+
+    // Basic validation for update payload
+    if (amount !== undefined && amount <= 0) {
+        return res.status(400).json({ message: 'Amount must be a positive number.' });
+    }
+    // Add other validations as needed for description, etc.
+
+    try {
+        const income = await Income.findById(incomeId);
+
+        if (!income) {
+            return res.status(404).json({ message: 'Income record not found.' });
+        }
+
+        // Authorization: Check if the user trying to update is the creator
+        if (income.createdBy.toString() !== userId) {
+             // Optional: Allow admins to update? Add role check here if needed: && req.user.role !== 'admin'
+            return res.status(403).json({ message: 'User not authorized to update this record.' });
+        }
+
+        // Prevent changing source if it was 'Sale' to maintain integrity
+        if (income.source === 'Sale' && source && source !== 'Sale') {
+             return res.status(400).json({ message: 'Cannot change the source of an income record linked to a sale.' });
+        }
+        // Prevent changing relatedSale ID manually
+        if (req.body.relatedSale) {
+            return res.status(400).json({ message: 'Cannot manually change the related sale.' });
+        }
+
+        // Update fields if they are provided in the request body
+        if (description !== undefined) income.description = description;
+        if (amount !== undefined) income.amount = amount; // Setter will handle formatting
+        if (date !== undefined) income.date = date;
+        if (notes !== undefined) income.notes = notes;
+        // Only update source if it's NOT currently 'Sale' or if the new source IS 'Sale' (though changing TO 'Sale' manually is odd)
+        if (source !== undefined && income.source !== 'Sale') income.source = source;
+
+        const updatedIncome = await income.save(); // Use save() to trigger validation and middleware
+
+        res.status(200).json(updatedIncome);
+
+    } catch (error) {
+        console.error('Error updating income:', error);
+        if (error.kind === 'ObjectId') {
+            return res.status(404).json({ message: 'Income record not found (invalid ID format).' });
+        }
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: 'Validation Error', errors: error.errors });
+        }
+        res.status(500).json({ message: 'Server error while updating income.' });
+    }
+};
+
+// @desc    Delete an income entry
+// @route   DELETE /api/income/:id
+// @access  Private
+exports.deleteIncome = async (req, res) => {
+    const incomeId = req.params.id;
+    const userId = req.user.id;
+
+    try {
+        const income = await Income.findById(incomeId);
+
+        if (!income) {
+            return res.status(404).json({ message: 'Income record not found.' });
+        }
+
+        // IMPORTANT: Prevent deleting income records automatically generated from sales
+        if (income.source === 'Sale') {
+            return res.status(400).json({ message: 'Cannot delete income records linked directly to sales. Consider adjusting the sale if needed.' });
+        }
+
+        // Authorization: Check if the user trying to delete is the creator
+        if (income.createdBy.toString() !== userId) {
+            // Optional: Allow admins to delete? Add role check here if needed: && req.user.role !== 'admin'
+            return res.status(403).json({ message: 'User not authorized to delete this record.' });
+        }
+
+        await Income.findByIdAndDelete(incomeId); // Or income.deleteOne() / income.remove()
+
+        res.status(200).json({ message: 'Income record deleted successfully.' }); // Send confirmation message
+
+    } catch (error) {
+        console.error('Error deleting income:', error);
+        if (error.kind === 'ObjectId') {
+            return res.status(404).json({ message: 'Income record not found (invalid ID format).' });
+        }
+        res.status(500).json({ message: 'Server error while deleting income.' });
+    }
+};
+

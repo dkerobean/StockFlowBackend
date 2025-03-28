@@ -1,23 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const expenseController = require('../controllers/expenseController');
-const { verifyToken } = require('../middleware/authJwt'); // Import authentication middleware
+const { verifyToken } = require('../middleware/authJwt');
 
-// Apply verifyToken middleware to all routes in this file
-router.use(verifyToken);
+router.use(verifyToken); // Apply auth to all routes
 
-// Route to record a new expense
-// POST /api/expense
+// POST /api/expense - Record expense
 router.post('/', expenseController.recordExpense);
 
-// Route to get all expense records
-// GET /api/expense
+// GET /api/expense - Get all expenses
 router.get('/', expenseController.getAllExpenses);
 
-// Route to get a single expense record by ID
-// GET /api/expense/:id
+// GET /api/expense/:id - Get single expense
 router.get('/:id', expenseController.getExpenseById);
 
-// Add routes for PUT (update) and DELETE as needed
+// PUT /api/expense/:id - Update expense <-- ADDED
+router.put('/:id', expenseController.updateExpense);
+
+// DELETE /api/expense/:id - Delete expense <-- ADDED
+router.delete('/:id', expenseController.deleteExpense);
 
 module.exports = router;
