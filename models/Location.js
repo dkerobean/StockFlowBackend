@@ -11,6 +11,7 @@ const locationSchema = new mongoose.Schema({
   address: { // Optional: More detailed address
     street: String,
     region: String,
+    country: String,
   },
   type: {
     type: String,

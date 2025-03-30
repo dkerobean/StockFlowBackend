@@ -4,13 +4,17 @@ const cors = require('cors');
 const http = require('http'); // Added for Socket.io
 const socketIo = require('socket.io'); // Added for real-time
 const connectDB = require('./config/db');
-const { initSocket } = require('./socket');
+const { initSocket, getIO } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
 
+const locationRoutes = require('./routes/locationRoutes');
+const productRoutes = require('./routes/productRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
+const stockTransferRoutes = require('./routes/stockTransferRoutes');
 const saleRoutes = require('./routes/saleRoutes');
 const incomeRoutes = require('./routes/incomeRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
-const productRoutes = require('./routes/productRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -50,8 +54,12 @@ app.use((req, res, next) => {
 connectDB();
 
 // Routes
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/product', productRoutes);
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/locations', locationRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/transfers', stockTransferRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/expense', expenseRoutes);

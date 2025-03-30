@@ -1,119 +1,211 @@
-const Product = require('../models/Product');
 const asyncHandler = require('express-async-handler');
+const Product = require('../models/Product');
+const Inventory = require('../models/Inventory'); // Needed if checking dependencies
+const StockTransfer = require('../models/StockTransfer'); // Needed if checking dependencies
+const mongoose = require('mongoose');
 
-// @desc    Create product
+// @desc    Create product definition
 // @route   POST /api/products
 // @access  Admin/Manager
 const createProduct = asyncHandler(async (req, res) => {
-  const { quantity } = req.body;
+    // Destructure only core product fields, exclude stock/location fields
+    const { name, description, sku, category, brand, price, barcode, isActive } = req.body;
 
-  if (quantity < 0) {
-    return res.status(400).json({ error: 'Initial quantity cannot be negative' });
-  }
+    if (!name || !price || !category) {
+        res.status(400);
+        throw new Error('Product name, price, and category are required');
+    }
+    if (price <= 0) {
+         res.status(400);
+         throw new Error('Price must be a positive value');
+    }
 
-  const product = new Product({
-    ...req.body,
-    createdBy: req.user.id
-  });
+    // Check SKU uniqueness if provided
+    if (sku) {
+        const skuExists = await Product.findOne({ sku });
+        if (skuExists) {
+            res.status(400);
+            throw new Error('Product with this SKU already exists');
+        }
+    }
+    // Check Barcode uniqueness if provided
+    if (barcode) {
+        const barcodeExists = await Product.findOne({ barcode });
+         if (barcodeExists) {
+            res.status(400);
+            throw new Error('Product with this Barcode already exists');
+        }
+    }
 
-  await product.save();
-  req.io.emit('productUpdate', product);
-  res.status(201).json(product);
+    const product = new Product({
+        name,
+        description,
+        sku: sku || undefined, // Let default generator run if not provided
+        category,
+        brand,
+        price,
+        barcode,
+        isActive: typeof isActive === 'boolean' ? isActive : true, // Default to active
+        createdBy: req.user.id,
+        auditLog: [{ // Add initial creation entry
+            user: req.user.id,
+            action: 'created',
+            timestamp: new Date()
+        }]
+    });
+
+    const createdProduct = await product.save();
+
+    // Emit event for new product definition
+    if (req.io) {
+      req.io.emit('productCreated', createdProduct);
+    }
+
+    res.status(201).json(createdProduct);
 });
 
-// @desc    Update product
+// @desc    Update product definition
 // @route   PUT /api/products/:id
 // @access  Admin/Manager
 const updateProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findByIdAndUpdate(
-    req.params.id,
-    req.body,
-    { new: true, runValidators: true }
-  );
+     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+       res.status(400);
+       throw new Error('Invalid Product ID format');
+    }
+    const productId = req.params.id;
+    // Exclude fields related to inventory or that shouldn't be mass-updated here
+    const { quantity, location, auditLog, createdBy, createdAt, updatedAt, ...updateData } = req.body;
 
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
-  }
+    const product = await Product.findById(productId);
 
-  req.io.emit('productUpdate', product);
-  res.json(product);
+    if (!product) {
+        res.status(404);
+        throw new Error('Product not found');
+    }
+
+     // Check for SKU/Barcode uniqueness if changed
+    if (updateData.sku && updateData.sku !== product.sku) {
+        const skuExists = await Product.findOne({ sku: updateData.sku, _id: { $ne: productId } });
+        if (skuExists) {
+            res.status(400); throw new Error('Another product with this SKU already exists');
+        }
+    }
+     if (updateData.barcode && updateData.barcode !== product.barcode) {
+        const barcodeExists = await Product.findOne({ barcode: updateData.barcode, _id: { $ne: productId } });
+        if (barcodeExists) {
+            res.status(400); throw new Error('Another product with this Barcode already exists');
+        }
+    }
+     if (updateData.price <= 0) {
+         res.status(400); throw new Error('Price must be a positive value');
+     }
+
+
+    // Apply updates - Mongoose handles only updating changed fields
+    Object.assign(product, updateData);
+
+    // Add an audit log entry for the update
+    product.auditLog.push({
+        user: req.user.id,
+        action: 'updated',
+        changes: updateData, // Log what was intended to be changed
+        timestamp: new Date()
+    });
+
+    const updatedProduct = await product.save();
+
+    if (req.io) {
+      req.io.emit('productUpdated', updatedProduct);
+    }
+
+    res.json(updatedProduct);
 });
 
-// @desc    Delete product
+// @desc    Soft delete a product (set isActive to false)
 // @route   DELETE /api/products/:id
 // @access  Admin
 const deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findByIdAndDelete(req.params.id);
+     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+       res.status(400);
+       throw new Error('Invalid Product ID format');
+    }
 
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
-  }
+    const product = await Product.findById(req.params.id);
 
-  req.io.emit('productDelete', product._id);
-  res.sendStatus(204);
+    if (!product) {
+        res.status(404);
+        throw new Error('Product not found');
+    }
+
+    // Prevent deactivation if there's active inventory or pending transfers? Optional check.
+    // const activeInventory = await Inventory.findOne({ product: product._id, quantity: { $gt: 0 } });
+    // const pendingTransfer = await StockTransfer.findOne({ product: product._id, status: { $in: ['Pending', 'Shipped'] } });
+    // if (activeInventory || pendingTransfer) {
+    //     res.status(400);
+    //     throw new Error('Cannot deactivate product with active stock or pending transfers.');
+    // }
+
+     if (!product.isActive) {
+        res.status(200).json({ message: 'Product already inactive', product });
+        return;
+    }
+
+    product.isActive = false;
+    product.auditLog.push({
+        user: req.user.id,
+        action: 'deactivated',
+        timestamp: new Date()
+    });
+    const updatedProduct = await product.save();
+
+    if (req.io) {
+      req.io.emit('productDeactivated', updatedProduct._id); // Send ID or object
+    }
+
+    res.status(200).json({ message: 'Product deactivated successfully', product: updatedProduct });
 });
 
-// @desc    Get all products
+// @desc    Get product definitions
 // @route   GET /api/products
 // @access  Authenticated
 const getProducts = asyncHandler(async (req, res) => {
-  const { category, location, brand, search } = req.query;
-  const filter = {};
+    const { category, brand, search, includeInactive } = req.query;
+    const filter = {};
 
-  if (category) filter.category = category;
-  if (location) filter.location = location;
-  if (brand) filter.brand = brand;
+    // Default to only active products unless includeInactive=true is passed (for anyone)
+    if (includeInactive !== 'true') {
+         filter.isActive = true;
+    }
 
-  if (search) {
-    filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { description: { $regex: search, $options: 'i' } }
-    ];
-  }
+    if (category) filter.category = category;
+    if (brand) filter.brand = brand;
 
-  const products = await Product.find(filter)
-    .populate('createdBy', 'email role')
-    .sort({ createdAt: -1 });
+    if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        filter.$or = [
+            { name: searchRegex },
+            { description: searchRegex },
+            { sku: searchRegex },
+            { barcode: searchRegex },
+            { brand: searchRegex }
+        ];
+    }
 
-  res.json(products);
+    const products = await Product.find(filter)
+        .populate('createdBy', 'name email')
+        .sort({ name: 1 }); // Sort by name
+
+    // Avoid calculating total stock here for performance. Use inventory endpoint.
+
+    res.json(products);
 });
 
-// @desc    Adjust stock
-// @route   PATCH /api/products/:id/stock
-// @access  Admin/Manager
-const adjustStock = asyncHandler(async (req, res) => {
-  const { adjustment, note } = req.body;
-  const product = await Product.findById(req.params.id);
+// REMOVED adjustStock function
 
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
-  }
-
-  const newQuantity = product.quantity + adjustment;
-  if (newQuantity < 0) {
-    return res.status(400).json({
-      error: `Cannot adjust stock below 0 (current: ${product.quantity})`
-    });
-  }
-
-  product.quantity = newQuantity;
-  product.auditLog.push({
-    user: req.user.id,
-    action: 'stock_adjustment',
-    adjustment,
-    note,
-    newQuantity
-  });
-
-  await product.save();
-  req.io.emit('stockUpdate', product);
-  res.json(product);
-});
 
 module.exports = {
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  getProducts,
-  adjustStock
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    getProducts,
 };
