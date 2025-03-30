@@ -58,5 +58,17 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// Add a helper method to check if user has access to a specific location
+userSchema.methods.hasAccessToLocation = function(locationId) {
+    if (!locationId) return false;
+    // Admins have access to all locations implicitly
+    if (this.role === 'admin') {
+        return true;
+    }
+    // Managers/Staff only have access if the location is in their list
+    // Ensure comparison handles ObjectId types correctly
+    return this.locations.some(loc => loc.equals(locationId));
+};
+
 const User = mongoose.model('User', userSchema);
 module.exports = User;
