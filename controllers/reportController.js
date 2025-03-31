@@ -11,22 +11,33 @@ const Location = require('../models/Location'); // Needed for populating locatio
 // --- PDF/Excel Generation Helpers (Consider moving to a separate utils/reportGenerators.js file) ---
 const PdfPrinter = require('pdfmake');
 const ExcelJS = require('exceljs');
-const fs = require('fs'); // Needed for pdfmake fonts
 
-// Define fonts for pdfmake (adjust path as needed)
+// 1. Define font descriptors. These map logical font names/styles
+//    to the actual font file names *expected* by pdfmake's internal VFS.
 const fonts = {
     Roboto: {
-        normal: Buffer.from(require('pdfmake/build/vfs_fonts.js').pdfMake.vfs['Roboto-Regular.ttf'], 'base64'),
-        bold: Buffer.from(require('pdfmake/build/vfs_fonts.js').pdfMake.vfs['Roboto-Medium.ttf'], 'base64'),
-        italics: Buffer.from(require('pdfmake/build/vfs_fonts.js').pdfMake.vfs['Roboto-Italic.ttf'], 'base64'),
-        bolditalics: Buffer.from(require('pdfmake/build/vfs_fonts.js').pdfMake.vfs['Roboto-MediumItalic.ttf'], 'base64')
+        normal: 'Roboto-Regular.ttf',
+        bold: 'Roboto-Medium.ttf',
+        italics: 'Roboto-Italic.ttf',
+        bolditalics: 'Roboto-MediumItalic.ttf'
     }
 };
+
+// 2. Import the virtual font file system. This populates pdfmake's internal VFS registry.
+//    It needs to be required BEFORE the printer is created.
+require('pdfmake/build/vfs_fonts.js'); // <--- Just require it to execute
+
+// 3. Create the PdfPrinter instance with the font descriptors.
+//    The printer will automatically look for the font files (like 'Roboto-Regular.ttf')
+//    in the VFS populated by the require() call above.
 const printer = new PdfPrinter(fonts);
 
-// Helper function to generate PDF
+// --- End CORRECTED Font Setup ---
+
+// Helper function to generate PDF (No changes needed inside this function)
 const generatePdf = (docDefinition, fileName, res) => {
     try {
+        // The printer now uses the VFS populated by the require call above
         const pdfDoc = printer.createPdfKitDocument(docDefinition);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}.pdf"`);
@@ -34,17 +45,23 @@ const generatePdf = (docDefinition, fileName, res) => {
         pdfDoc.end();
     } catch (error) {
         console.error("Error generating PDF:", error);
-        res.status(500).json({ message: "Error generating PDF report" });
+        // Ensure response is sent even on error
+        if (!res.headersSent) {
+            res.status(500).json({ message: "Error generating PDF report" });
+        } else {
+             // If headers already sent, just end the response abruptly
+             res.end();
+        }
     }
 };
 
-// Helper function to generate Excel
+// Helper function to generate Excel (No changes needed inside this function)
 const generateExcel = async (columns, data, fileName, sheetName, res) => {
     try {
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet(sheetName);
-        worksheet.columns = columns; // [{ header: 'Header Name', key: 'dataKey', width: 15 }, ...]
-        worksheet.addRows(data); // Data should be an array of objects matching the keys in columns
+        worksheet.columns = columns;
+        worksheet.addRows(data);
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}.xlsx"`);
@@ -52,7 +69,12 @@ const generateExcel = async (columns, data, fileName, sheetName, res) => {
         res.end();
     } catch (error) {
         console.error("Error generating Excel:", error);
-        res.status(500).json({ message: "Error generating Excel report" });
+         // Ensure response is sent even on error
+        if (!res.headersSent) {
+             res.status(500).json({ message: "Error generating Excel report" });
+         } else {
+             res.end();
+         }
     }
 };
 // --- End PDF/Excel Helpers ---
