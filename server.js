@@ -15,6 +15,7 @@ const saleRoutes = require('./routes/saleRoutes');
 const incomeRoutes = require('./routes/incomeRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const authRoutes = require('./routes/authRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 
 const app = express();
 
@@ -53,7 +54,7 @@ app.use((req, res, next) => {
 // Database connection
 connectDB();
 
-// Routes
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/locations', locationRoutes);
@@ -63,6 +64,7 @@ app.use('/api/transfers', stockTransferRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/expense', expenseRoutes);
+app.use('/api/reports', reportRoutes);
 
 
 // Protected Route
