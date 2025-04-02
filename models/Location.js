@@ -6,9 +6,9 @@ const locationSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Location name is required'],
     trim: true,
-    unique: true // Ensure location names are unique
+    unique: true 
   },
-  address: { // Optional: More detailed address
+  address: {
     street: String,
     region: String,
     country: String,
@@ -16,10 +16,10 @@ const locationSchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ['Store', 'Warehouse'], // Define types of locations
+    enum: ['Store', 'Warehouse'],
     default: 'Store'
   },
-  isActive: { // To deactivate a location without deleting data
+  isActive: {
     type: Boolean,
     default: true
   },

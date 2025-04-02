@@ -23,7 +23,7 @@ const inventorySchema = new mongoose.Schema({
     min: [0, 'Minimum stock cannot be negative'],
     default: 5
   },
-  notifyAt: {  // Custom threshold for notifications at this location
+  notifyAt: {
     type: Number,
     min: 0,
     default: function() { return this.minStock; } // Defaults to minStock for this location
@@ -39,8 +39,8 @@ const inventorySchema = new mongoose.Schema({
     adjustment: Number, // Positive or negative change
     note: String,
     newQuantity: Number, // Quantity AFTER this action
-    relatedSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' }, // Link to sale if applicable
-    relatedTransferId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockTransfer' }, // Link to transfer if applicable
+    relatedSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' }, 
+    relatedTransferId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockTransfer' },
     timestamp: { type: Date, default: Date.now }
   }]
 }, { timestamps: true });

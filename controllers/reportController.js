@@ -5,15 +5,14 @@ const Inventory = require('../models/Inventory');
 const Sale = require('../models/Sale');
 const Income = require('../models/Income');
 const Expense = require('../models/Expense');
-const Product = require('../models/Product'); // Needed for populating product details
-const Location = require('../models/Location'); // Needed for populating location details
+const Product = require('../models/Product');
+const Location = require('../models/Location');
 
-// --- PDF/Excel Generation Helpers (Consider moving to a separate utils/reportGenerators.js file) ---
+// --- PDF/Excel Generation Helpers
 const PdfPrinter = require('pdfmake');
 const ExcelJS = require('exceljs');
 
-// 1. Define font descriptors. These map logical font names/styles
-//    to the actual font file names *expected* by pdfmake's internal VFS.
+// 1. Define font descriptors.
 const fonts = {
     Roboto: {
         normal: 'Roboto-Regular.ttf',
@@ -23,21 +22,15 @@ const fonts = {
     }
 };
 
-// 2. Import the virtual font file system. This populates pdfmake's internal VFS registry.
-//    It needs to be required BEFORE the printer is created.
-require('pdfmake/build/vfs_fonts.js'); // <--- Just require it to execute
+// 2. Import the virtual font file system.
+require('pdfmake/build/vfs_fonts.js');
 
 // 3. Create the PdfPrinter instance with the font descriptors.
-//    The printer will automatically look for the font files (like 'Roboto-Regular.ttf')
-//    in the VFS populated by the require() call above.
 const printer = new PdfPrinter(fonts);
 
-// --- End CORRECTED Font Setup ---
-
-// Helper function to generate PDF (No changes needed inside this function)
+// Helper function to generate PDF
 const generatePdf = (docDefinition, fileName, res) => {
     try {
-        // The printer now uses the VFS populated by the require call above
         const pdfDoc = printer.createPdfKitDocument(docDefinition);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}.pdf"`);
@@ -45,17 +38,14 @@ const generatePdf = (docDefinition, fileName, res) => {
         pdfDoc.end();
     } catch (error) {
         console.error("Error generating PDF:", error);
-        // Ensure response is sent even on error
         if (!res.headersSent) {
             res.status(500).json({ message: "Error generating PDF report" });
         } else {
-             // If headers already sent, just end the response abruptly
              res.end();
         }
     }
 };
 
-// Helper function to generate Excel (No changes needed inside this function)
 const generateExcel = async (columns, data, fileName, sheetName, res) => {
     try {
         const workbook = new ExcelJS.Workbook();
@@ -69,7 +59,6 @@ const generateExcel = async (columns, data, fileName, sheetName, res) => {
         res.end();
     } catch (error) {
         console.error("Error generating Excel:", error);
-         // Ensure response is sent even on error
         if (!res.headersSent) {
              res.status(500).json({ message: "Error generating Excel report" });
          } else {
@@ -100,7 +89,7 @@ const applyLocationFilter = (filter, req, locationIdQueryParam = 'locationId') =
     const locationId = req.query[locationIdQueryParam];
 
     if (locationId && !mongoose.Types.ObjectId.isValid(locationId)) {
-        throw new Error('Invalid Location ID format'); // Will be caught by asyncHandler
+        throw new Error('Invalid Location ID format'); 
     }
 
     // Admins see all unless a specific location is requested

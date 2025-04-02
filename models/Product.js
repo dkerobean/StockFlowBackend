@@ -30,16 +30,11 @@ const productSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  // REMOVED: location - Now handled by Inventory model
-  // REMOVED: quantity - Now handled by Inventory model
-  // REMOVED: minStock - Now handled by Inventory model
-  // REMOVED: notifyAt - Now handled by Inventory model
-  // REMOVED: lastNotified - Now handled by Inventory model
   price: { // Base selling price
     type: Number,
     min: [0.01, 'Price must be at least 0.01'],
     required: true,
-    set: v => parseFloat(v.toFixed(2)) // Ensure 2 decimal places
+    set: v => parseFloat(v.toFixed(2))
   },
   barcode: {
     type: String,
@@ -57,11 +52,10 @@ const productSchema = new mongoose.Schema({
     required: true
   },
   // General product audit log (e.g., price change, description update)
-  // Stock changes are now logged in the Inventory model
   auditLog: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    action: String, // e.g., 'created', 'updated_price', 'updated_description'
-    changes: mongoose.Schema.Types.Mixed, // Store what changed
+    action: String,
+    changes: mongoose.Schema.Types.Mixed, 
     timestamp: { type: Date, default: Date.now }
   }]
 }, { timestamps: true });
