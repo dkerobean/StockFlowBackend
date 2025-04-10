@@ -7,9 +7,12 @@ const mongoose = require('mongoose');
 // @desc    Create product definition
 // @route   POST /api/products
 // @access  Admin/Manager
+// @desc    Create product definition
+// @route   POST /api/products
+// @access  Admin/Manager
 const createProduct = asyncHandler(async (req, res) => {
-    // Destructure only core product fields, exclude stock/location fields
-    const { name, description, sku, category, brand, price, barcode, isActive } = req.body;
+    // Destructure imageUrl along with other fields
+    const { name, description, sku, category, brand, price, barcode, isActive, imageUrl } = req.body;
 
     if (!name || !price || !category) {
         res.status(400);
@@ -40,6 +43,9 @@ const createProduct = asyncHandler(async (req, res) => {
     const product = new Product({
         name,
         description,
+        // --- Include imageUrl ---
+        imageUrl: imageUrl || '', // Use provided URL or default to empty string
+        // --- --------------- ---
         sku: sku || undefined, // Let default generator run if not provided
         category,
         brand,
@@ -56,7 +62,7 @@ const createProduct = asyncHandler(async (req, res) => {
 
     const createdProduct = await product.save();
 
-    // Emit event for new product definition
+    // Emit event for new product definition (imageUrl will be included)
     if (req.io) {
       req.io.emit('productCreated', createdProduct);
     }
@@ -73,7 +79,7 @@ const updateProduct = asyncHandler(async (req, res) => {
        throw new Error('Invalid Product ID format');
     }
     const productId = req.params.id;
-    // Exclude fields related to inventory or that shouldn't be mass-updated here
+    // imageUrl will be included in updateData if sent in the request body
     const { quantity, location, auditLog, createdBy, createdAt, updatedAt, ...updateData } = req.body;
 
     const product = await Product.findById(productId);
@@ -96,30 +102,39 @@ const updateProduct = asyncHandler(async (req, res) => {
             res.status(400); throw new Error('Another product with this Barcode already exists');
         }
     }
-     if (updateData.price <= 0) {
+     // Check price validity if it's being updated
+     if (updateData.price !== undefined && updateData.price <= 0) {
          res.status(400); throw new Error('Price must be a positive value');
      }
 
 
     // Apply updates - Mongoose handles only updating changed fields
+    // imageUrl will be updated if it exists in updateData
     Object.assign(product, updateData);
 
     // Add an audit log entry for the update
-    product.auditLog.push({
-        user: req.user.id,
-        action: 'updated',
-        changes: updateData, // Log what was intended to be changed
-        timestamp: new Date()
-    });
+    // Only log if there were actual changes attempted
+    if (Object.keys(updateData).length > 0) {
+        product.auditLog.push({
+            user: req.user.id,
+            action: 'updated',
+            changes: updateData, // Log what was intended to be changed
+            timestamp: new Date()
+        });
+    }
+
 
     const updatedProduct = await product.save();
 
+    // Emit event (updatedProduct will include imageUrl)
     if (req.io) {
       req.io.emit('productUpdated', updatedProduct);
     }
 
     res.json(updatedProduct);
 });
+
+
 
 // @desc    Soft delete a product (set isActive to false)
 // @route   DELETE /api/products/:id

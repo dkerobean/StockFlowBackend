@@ -14,6 +14,11 @@ const productSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: '' 
+  },
   sku: {
     type: String,
     unique: true,
@@ -55,7 +60,7 @@ const productSchema = new mongoose.Schema({
   auditLog: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     action: String,
-    changes: mongoose.Schema.Types.Mixed, 
+    changes: mongoose.Schema.Types.Mixed,
     timestamp: { type: Date, default: Date.now }
   }]
 }, { timestamps: true });
