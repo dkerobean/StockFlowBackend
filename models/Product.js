@@ -2,7 +2,7 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 // Keep Inventory model import if needed for hooks/methods, otherwise remove
-const Inventory = require('./Inventory');
+// const Inventory = require('./Inventory'); // Can often be loaded dynamically in methods
 
 const productSchema = new mongoose.Schema({
   name: {
@@ -17,7 +17,7 @@ const productSchema = new mongoose.Schema({
   imageUrl: {
     type: String,
     trim: true,
-    default: '' 
+    default: ''
   },
   sku: {
     type: String,
@@ -26,14 +26,14 @@ const productSchema = new mongoose.Schema({
     default: () => uuidv4()
   },
   category: {
-    type: String,
-    required: true,
-    enum: ['Electronics', 'Clothing', 'Groceries', 'Tools', 'Other'], // Consider making this a separate model if it grows
-    default: 'Other'
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    required: [true, 'Product category is required'] // Category is required
   },
   brand: {
-    type: String,
-    trim: true
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Brand',
+    required: false                    
   },
   price: { // Base selling price
     type: Number,
@@ -56,7 +56,6 @@ const productSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  // General product audit log (e.g., price change, description update)
   auditLog: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     action: String,
@@ -65,26 +64,25 @@ const productSchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
-// Indexes
+// Indexes (Updated for ObjectId refs)
 productSchema.index({ name: 1 });
 productSchema.index({ sku: 1 });
-productSchema.index({ category: 1 });
-productSchema.index({ brand: 1 });
+productSchema.index({ category: 1 }); // Now indexes the ObjectId ref
+productSchema.index({ brand: 1 });   // Now indexes the ObjectId ref
 productSchema.index({ barcode: 1 });
 
-// Method to get total stock across all locations (can be slow, use with caution)
+// Method to get total stock across all locations
 productSchema.methods.getTotalStock = async function() {
-  const Inventory = mongoose.model('Inventory'); // Load model here
+  const Inventory = mongoose.model('Inventory'); // Load model dynamically
   const stockLevels = await Inventory.find({ product: this._id });
   return stockLevels.reduce((sum, item) => sum + item.quantity, 0);
 };
 
 // Method to get stock at a specific location
 productSchema.methods.getStockAtLocation = async function(locationId) {
-    const Inventory = mongoose.model('Inventory'); // Load model here
+    const Inventory = mongoose.model('Inventory'); // Load model dynamically
     const inventory = await Inventory.findOne({ product: this._id, location: locationId });
     return inventory ? inventory.quantity : 0;
 };
-
 
 module.exports = mongoose.model('Product', productSchema);

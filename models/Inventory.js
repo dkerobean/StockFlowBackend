@@ -18,6 +18,10 @@ const inventorySchema = new mongoose.Schema({
     min: [0, 'Quantity cannot be negative'],
     default: 0
   },
+  expiryDate: {
+    type: Date,
+    required: false
+  },
   minStock: {
     type: Number,
     min: [0, 'Minimum stock cannot be negative'],
@@ -29,7 +33,6 @@ const inventorySchema = new mongoose.Schema({
     default: function() { return this.minStock; } // Defaults to minStock for this location
   },
   lastNotified: Date, // Prevent duplicate alerts for this specific stock level
-  // Audit log specific to stock movements AT THIS LOCATION
   auditLog: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     action: { // e.g., 'initial_stock', 'sale', 'adjustment', 'transfer_in', 'transfer_out'
@@ -39,7 +42,7 @@ const inventorySchema = new mongoose.Schema({
     adjustment: Number, // Positive or negative change
     note: String,
     newQuantity: Number, // Quantity AFTER this action
-    relatedSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' }, 
+    relatedSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
     relatedTransferId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockTransfer' },
     timestamp: { type: Date, default: Date.now }
   }]
@@ -49,5 +52,9 @@ const inventorySchema = new mongoose.Schema({
 inventorySchema.index({ product: 1, location: 1 }, { unique: true });
 inventorySchema.index({ location: 1 });
 inventorySchema.index({ quantity: 1 }); // For finding low stock items
+// --- ADDED INDEX ---
+// Index expiry date. Sparse means it only indexes documents that HAVE this field.
+inventorySchema.index({ expiryDate: 1 }, { sparse: true });
+// --- END ADDED INDEX ---
 
 module.exports = mongoose.model('Inventory', inventorySchema);
