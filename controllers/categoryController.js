@@ -6,7 +6,7 @@ const User = require('../models/User');
 // @access  Private (Manager or Admin)
 exports.createCategory = async (req, res) => {
     const { name } = req.body;
-    const userId = req.userId;
+    const userId = req.user?._id;
 
     if (!name) {
         return res.status(400).json({ message: 'Category name is required' });

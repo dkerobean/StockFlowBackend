@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isAdmin, isManagerOrAdmin } = require('../middleware/authJwt'); // Adjust path if needed
-const brandController = require('../controllers/brandController'); // Adjust path if needed
+const brandController = require('../controllers/brandController');
+
 
 // Create Brand
 router.post('/', verifyToken, isManagerOrAdmin, brandController.createBrand);

@@ -6,7 +6,7 @@ const User = require('../models/User'); // Assuming you have a User model
 // @access  Private (Manager or Admin)
 exports.createBrand = async (req, res) => {
     const { name } = req.body;
-    const userId = req.userId; // Added by verifyToken middleware
+   const userId = req.user?._id;
 
     if (!name) {
         return res.status(400).json({ message: 'Brand name is required' });
