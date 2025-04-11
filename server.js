@@ -16,6 +16,8 @@ const incomeRoutes = require('./routes/incomeRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const authRoutes = require('./routes/authRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const brandRoutes = require('./routes/brandRoutes');
+const categoryRoutes = require('./routes/categoryRoutes');
 
 const app = express();
 
@@ -65,6 +67,8 @@ app.use('/api/sales', saleRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/expense', expenseRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/brands', brandRoutes);
+app.use('/api/categories', categoryRoutes)
 
 
 // Protected Route
