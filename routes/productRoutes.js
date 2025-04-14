@@ -6,6 +6,7 @@ const {
   updateProduct,
   deleteProduct,
   getProducts,
+  getProductById
 } = require('../controllers/productController');
 
 // Use isManagerOrAdmin for creation and update
@@ -17,6 +18,9 @@ router.delete('/:id', verifyToken, isAdmin, deleteProduct);
 
 // Any authenticated user can get product definitions
 router.get('/', verifyToken, getProducts);
+
+// GET /api/products/:id
+router.get('/:id', verifyToken, getProductById);
 
 
 module.exports = router;

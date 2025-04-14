@@ -230,6 +230,44 @@ const getProducts = asyncHandler(async (req, res) => {
     res.json(products);
 });
 
+const getProductById = asyncHandler(async (req, res) => {
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+       res.status(400);
+       throw new Error('Invalid Product ID format');
+    }
+    const productId = req.params.id;
+    const { populate } = req.query; // Get populate query param from URL
+
+    let query = Product.findById(productId);
+
+    // Handle population if requested
+    if (populate) {
+        const fieldsToPopulate = populate.split(',');
+        // Add more fields here if needed for population
+        if (fieldsToPopulate.includes('category')) {
+           query = query.populate('category', 'name'); // Populate category name
+        }
+        if (fieldsToPopulate.includes('brand')) {
+           query = query.populate('brand', 'name');    // Populate brand name
+        }
+         if (fieldsToPopulate.includes('createdBy')) {
+           query = query.populate('createdBy', 'name email'); // Populate creator info
+        }
+        // Add other potential fields like 'updatedBy' etc. if your model has them
+    }
+
+    const product = await query.exec(); // Execute the query
+
+    if (product) {
+        res.json(product); // Send the found product
+    } else {
+        // If ID format is valid but product doesn't exist
+        res.status(404);
+        throw new Error('Product not found');
+    }
+});
+
 
 
 
@@ -239,4 +277,5 @@ module.exports = {
     updateProduct,
     deleteProduct,
     getProducts,
+    getProductById
 };
