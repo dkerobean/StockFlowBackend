@@ -184,12 +184,11 @@ const deleteProduct = asyncHandler(async (req, res) => {
 // @route   GET /api/products
 // @access  Authenticated
 const getProducts = asyncHandler(async (req, res) => {
-    const { category, brand, search, includeInactive } = req.query;
+    const { category, brand, search, includeInactive, populate } = req.query; // Check for populate query
     const filter = {};
 
-    // Default to only active products unless includeInactive=true is passed (for anyone)
     if (includeInactive !== 'true') {
-         filter.isActive = true;
+        filter.isActive = true;
     }
 
     if (category) filter.category = category;
@@ -201,21 +200,38 @@ const getProducts = asyncHandler(async (req, res) => {
             { name: searchRegex },
             { description: searchRegex },
             { sku: searchRegex },
-            { barcode: searchRegex },
-            { brand: searchRegex }
+            { barcode: searchRegex }
+            // Searching on populated brand/category name is more complex,
+            // usually done via aggregation pipeline if needed frequently.
         ];
     }
 
-    const products = await Product.find(filter)
-        .populate('createdBy', 'name email')
-        .sort({ name: 1 }); // Sort by name
+    let query = Product.find(filter);
 
-    // Avoid calculating total stock here for performance. Use inventory endpoint.
+    // --- *** CRITICAL FIX: POPULATE CATEGORY AND BRAND *** ---
+    // Check if frontend explicitly requested population or default to populating needed fields
+    const fieldsToPopulate = (populate || 'category,brand,createdBy').split(',');
+
+    if (fieldsToPopulate.includes('category')) {
+      query = query.populate('category', 'name'); // Select only 'name' from Category
+    }
+    if (fieldsToPopulate.includes('brand')) {
+      query = query.populate('brand', 'name');    // Select only 'name' from Brand
+    }
+    if (fieldsToPopulate.includes('createdBy')) {
+      query = query.populate('createdBy', 'name email'); // Keep existing createdBy population
+    }
+
+
+    query = query.sort({ name: 1 }); // Sort by name
+
+    const products = await query.exec(); // Execute the query
 
     res.json(products);
 });
 
-// REMOVED adjustStock function
+
+
 
 
 module.exports = {
