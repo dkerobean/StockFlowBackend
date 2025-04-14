@@ -18,8 +18,13 @@ const authRoutes = require('./routes/authRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const brandRoutes = require('./routes/brandRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 const app = express();
+const path = require('path');
+
+// Serve static files from the 'public' directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Create HTTP server for Socket.io
 const server = http.createServer(app);
@@ -69,6 +74,7 @@ app.use('/api/expense', expenseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/categories', categoryRoutes)
+app.use('/api/upload', uploadRoutes);
 
 
 // Protected Route
