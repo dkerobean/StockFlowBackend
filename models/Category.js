@@ -8,6 +8,18 @@ const categorySchema = new mongoose.Schema({
     unique: true,
     trim: true
   },
+  slug: { // <-- ADDED FIELD
+        type: String,
+        trim: true,
+        unique: true, // Slugs must be unique for URLs
+        lowercase: true // Slugs are typically lowercase
+    },
+    status: { // <-- ADDED FIELD
+        type: String,
+        required: true,
+        enum: ['active', 'inactive'], // Restrict possible values
+        default: 'active' // Set a default status
+    },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
