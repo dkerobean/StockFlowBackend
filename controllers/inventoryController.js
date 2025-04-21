@@ -209,10 +209,97 @@ const adjustInventory = asyncHandler(async (req, res) => {
     res.json(populatedInventory);
 });
 
+// @desc    Get expired inventory items (Expired or expiring today, with quantity > 0)
+// @route   GET /api/inventory/expired
+// @access  Authenticated User (filtered by access)
+const getExpiredInventory = asyncHandler(async (req, res) => {
+    const now = new Date();
+    const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+
+    const filter = {
+        expiryDate: { $lte: now }, // Items that expired before or at this moment
+        quantity: { $gt: 0 }       // Only items with stock
+    };
+
+    // Authorization Filtering
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) {
+            return res.json([]);
+        }
+        filter.location = { $in: req.user.locations };
+    }
+
+    const expiredList = await Inventory.find(filter)
+        .populate('product', 'name sku imageUrl')
+        .populate('location', 'name type')
+        .sort({ expiryDate: 1 });
+
+    res.json(expiredList);
+})
+
+
+// @desc    Get low stock inventory items (quantity <= notifyAt)
+// @route   GET /api/inventory/low-stock
+// @access  Authenticated User (filtered by access)
+const getLowStockInventory = asyncHandler(async (req, res) => {
+    const filter = {};
+
+    // Core filter for low stock items using $expr to compare fields
+    filter.$expr = { $lte: ['$quantity', '$notifyAt'] };
+
+    // Optionally filter out items with zero quantity if they are not considered "low stock" action items
+    // filter.quantity = { $gt: 0 }; // Uncomment this line if you DON'T want to see items already at 0
+
+    // Authorization Filtering (Same logic as getInventory):
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) {
+            return res.json([]); // User has access to no locations
+        }
+         // Add the user's location access to the filter
+        filter.location = { $in: req.user.locations };
+    }
+
+    const lowStockList = await Inventory.find(filter)
+        .populate('product', 'name sku imageUrl') // Populate product details
+        .populate('location', 'name type')      // Populate location details
+        .sort({ 'location.name': 1, 'product.name': 1 }); // Sort by location, then product
+
+    res.json(lowStockList);
+});
+
+// @desc    Get out-of-stock inventory items (quantity <= 0)
+// @route   GET /api/inventory/out-of-stock
+// @access  Authenticated User (filtered by access)
+const getOutOfStockInventory = asyncHandler(async (req, res) => {
+    const filter = {};
+
+    // Core filter for out-of-stock items
+    filter.quantity = { $lte: 0 }; // Quantity is zero or less
+
+    // Authorization Filtering (Same logic as getInventory):
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) {
+            return res.json([]); // User has access to no locations
+        }
+        // Add the user's location access to the filter
+        filter.location = { $in: req.user.locations };
+    }
+
+    const outOfStockList = await Inventory.find(filter)
+        .populate('product', 'name sku imageUrl isActive') // Include isActive status
+        .populate('location', 'name type isActive')      // Include isActive status
+        .sort({ 'location.name': 1, 'product.name': 1 }); // Sort by location, then product
+
+    res.json(outOfStockList);
+});
+
 
 module.exports = {
     addInventoryRecord,
     getInventory,
     getInventoryById,
     adjustInventory,
+    getLowStockInventory,
+    getExpiredInventory,
+    getOutOfStockInventory,
 };
