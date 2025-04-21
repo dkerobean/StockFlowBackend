@@ -213,78 +213,174 @@ const adjustInventory = asyncHandler(async (req, res) => {
 // @route   GET /api/inventory/expired
 // @access  Authenticated User (filtered by access)
 const getExpiredInventory = asyncHandler(async (req, res) => {
-    const now = new Date();
-    const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+    const { search, locationId } = req.query; // Get filter params
 
+    const now = new Date();
+    // Base filter for expired items with stock
     const filter = {
         expiryDate: { $lte: now }, // Items that expired before or at this moment
-        quantity: { $gt: 0 }       // Only items with stock
+        quantity: { $gt: 0 }       // Only items with positive stock
     };
 
-    // Authorization Filtering
-    if (req.user.role !== 'admin') {
-        if (!req.user.locations || req.user.locations.length === 0) {
-            return res.json([]);
+    // --- Apply Location Filter ---
+    if (locationId) {
+        if (!mongoose.Types.ObjectId.isValid(locationId)) {
+            res.status(400); throw new Error('Invalid Location ID format');
         }
-        filter.location = { $in: req.user.locations };
+        filter.location = locationId;
     }
 
+    // --- Authorization Filtering (Apply BEFORE search for efficiency if possible) ---
+    let accessibleLocations = null;
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) {
+            return res.json([]); // User has access to no locations
+        }
+        accessibleLocations = req.user.locations; // Store accessible locations
+
+        // If a specific location was requested AND the user doesn't have access
+        if (locationId && !accessibleLocations.some(loc => loc.equals(locationId))) {
+             res.status(403); throw new Error('Forbidden: Access denied to this location inventory');
+        }
+        // Apply user's location access to the main filter if no specific location was requested OR if the requested location is accessible
+         if (!locationId || (locationId && accessibleLocations.some(loc => loc.equals(locationId)))) {
+            filter.location = { $in: accessibleLocations };
+         }
+    }
+
+    // --- Apply Search Filter (Search Product Name/SKU) ---
+    let productIdsToInclude = null;
+    if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        // Find products matching the search
+        const matchedProducts = await Product.find({
+            $or: [
+                { name: searchRegex },
+                { sku: searchRegex }
+                // Add other searchable product fields if needed (e.g., barcode)
+            ]
+        }).select('_id'); // Only get the IDs
+
+        productIdsToInclude = matchedProducts.map(p => p._id);
+
+        // If search term exists but no products match, return empty immediately
+        if (productIdsToInclude.length === 0) {
+            return res.json([]);
+        }
+        // Add product ID condition to the main filter
+        filter.product = { $in: productIdsToInclude };
+    }
+
+
+    // --- Execute Query ---
     const expiredList = await Inventory.find(filter)
-        .populate('product', 'name sku imageUrl')
-        .populate('location', 'name type')
-        .sort({ expiryDate: 1 });
+        // Populate necessary fields for display
+        .populate('product', 'name sku imageUrl isActive') // Include isActive if needed
+        .populate('location', 'name type isActive') // Include isActive if needed
+        .sort({ expiryDate: 1 }); // Sort by expiry date
 
     res.json(expiredList);
-})
+});
+
 
 
 // @desc    Get low stock inventory items (quantity <= notifyAt)
 // @route   GET /api/inventory/low-stock
 // @access  Authenticated User (filtered by access)
+
 const getLowStockInventory = asyncHandler(async (req, res) => {
-    const filter = {};
+    const { search, locationId } = req.query; // Get filter params
 
-    // Core filter for low stock items using $expr to compare fields
-    filter.$expr = { $lte: ['$quantity', '$notifyAt'] };
+    // Base filter for low stock items
+    const filter = {
+        $expr: { $lte: ['$quantity', '$notifyAt'] }
+    };
+    // Optionally filter out items already at zero if required
+    // filter.quantity = { $gt: 0 };
 
-    // Optionally filter out items with zero quantity if they are not considered "low stock" action items
-    // filter.quantity = { $gt: 0 }; // Uncomment this line if you DON'T want to see items already at 0
-
-    // Authorization Filtering (Same logic as getInventory):
-    if (req.user.role !== 'admin') {
-        if (!req.user.locations || req.user.locations.length === 0) {
-            return res.json([]); // User has access to no locations
+    // --- Apply Location Filter ---
+    if (locationId) {
+        if (!mongoose.Types.ObjectId.isValid(locationId)) {
+            res.status(400); throw new Error('Invalid Location ID format');
         }
-         // Add the user's location access to the filter
-        filter.location = { $in: req.user.locations };
+        filter.location = locationId;
     }
 
+    // --- Authorization Filtering ---
+    let accessibleLocations = null;
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) return res.json([]);
+        accessibleLocations = req.user.locations;
+        if (locationId && !accessibleLocations.some(loc => loc.equals(locationId))) {
+             res.status(403); throw new Error('Forbidden: Access denied to this location inventory');
+        }
+         if (!locationId || (locationId && accessibleLocations.some(loc => loc.equals(locationId)))) {
+            filter.location = { $in: accessibleLocations };
+         }
+    }
+
+    // --- Apply Search Filter (Search Product Name/SKU) ---
+    if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        const matchedProducts = await Product.find({ $or: [ { name: searchRegex }, { sku: searchRegex } ] }).select('_id');
+        const productIdsToInclude = matchedProducts.map(p => p._id);
+        if (productIdsToInclude.length === 0) return res.json([]);
+         // Add product ID condition
+         filter.product = { $in: productIdsToInclude };
+    }
+
+    // --- Execute Query ---
     const lowStockList = await Inventory.find(filter)
-        .populate('product', 'name sku imageUrl') // Populate product details
-        .populate('location', 'name type')      // Populate location details
+        .populate('product', 'name sku imageUrl isActive') // Populate product details
+        .populate('location', 'name type isActive')      // Populate location details
         .sort({ 'location.name': 1, 'product.name': 1 }); // Sort by location, then product
 
     res.json(lowStockList);
 });
 
-// @desc    Get out-of-stock inventory items (quantity <= 0)
+// @desc    Get out-of-stock inventory items (with filtering)
 // @route   GET /api/inventory/out-of-stock
 // @access  Authenticated User (filtered by access)
 const getOutOfStockInventory = asyncHandler(async (req, res) => {
-    const filter = {};
+    const { search, locationId } = req.query; // Get filter params
 
-    // Core filter for out-of-stock items
-    filter.quantity = { $lte: 0 }; // Quantity is zero or less
+    // Base filter for out-of-stock items
+    const filter = {
+        quantity: { $lte: 0 } // Quantity is zero or less
+    };
 
-    // Authorization Filtering (Same logic as getInventory):
-    if (req.user.role !== 'admin') {
-        if (!req.user.locations || req.user.locations.length === 0) {
-            return res.json([]); // User has access to no locations
+    // --- Apply Location Filter ---
+    if (locationId) {
+        if (!mongoose.Types.ObjectId.isValid(locationId)) {
+            res.status(400); throw new Error('Invalid Location ID format');
         }
-        // Add the user's location access to the filter
-        filter.location = { $in: req.user.locations };
+        filter.location = locationId;
     }
 
+    // --- Authorization Filtering ---
+    let accessibleLocations = null;
+    if (req.user.role !== 'admin') {
+        if (!req.user.locations || req.user.locations.length === 0) return res.json([]);
+        accessibleLocations = req.user.locations;
+        if (locationId && !accessibleLocations.some(loc => loc.equals(locationId))) {
+             res.status(403); throw new Error('Forbidden: Access denied to this location inventory');
+        }
+        if (!locationId || (locationId && accessibleLocations.some(loc => loc.equals(locationId)))) {
+           filter.location = { $in: accessibleLocations };
+        }
+    }
+
+    // --- Apply Search Filter (Search Product Name/SKU) ---
+    if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        const matchedProducts = await Product.find({ $or: [ { name: searchRegex }, { sku: searchRegex } ] }).select('_id');
+        const productIdsToInclude = matchedProducts.map(p => p._id);
+        if (productIdsToInclude.length === 0) return res.json([]);
+        // Add product ID condition
+        filter.product = { $in: productIdsToInclude };
+    }
+
+    // --- Execute Query ---
     const outOfStockList = await Inventory.find(filter)
         .populate('product', 'name sku imageUrl isActive') // Include isActive status
         .populate('location', 'name type isActive')      // Include isActive status
