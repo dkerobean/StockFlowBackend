@@ -82,44 +82,140 @@ const addInventoryRecord = asyncHandler(async (req, res) => {
 // @route   GET /api/inventory
 // @access  Authenticated User (filtered by access)
 const getInventory = asyncHandler(async (req, res) => {
-    const { productId, locationId, lowStock } = req.query;
-    const filter = {};
+    // --- Extract query parameters ---
+    const {
+        productId,
+        locationId,
+        lowStock,
+        search, // <-- Extract search parameter
+        page = 1,   // <-- Extract page with default
+        limit = 10 // <-- Extract limit with default
+    } = req.query;
 
+    const filter = {}; // Initialize the main filter object for the Inventory query
+    const queryPage = parseInt(page, 10);
+    const queryLimit = parseInt(limit, 10);
+    const skip = (queryPage - 1) * queryLimit;
+
+    // --- Basic Filters (Apply directly to Inventory query) ---
     if (productId) {
-        if (!mongoose.Types.ObjectId.isValid(productId)) {res.status(400); throw new Error('Invalid Product ID');}
+        if (!mongoose.Types.ObjectId.isValid(productId)) { res.status(400); throw new Error('Invalid Product ID'); }
         filter.product = productId;
     }
     if (locationId) {
-        if (!mongoose.Types.ObjectId.isValid(locationId)) {res.status(400); throw new Error('Invalid Location ID');}
+        if (!mongoose.Types.ObjectId.isValid(locationId)) { res.status(400); throw new Error('Invalid Location ID'); }
         filter.location = locationId;
     }
-     if (lowStock === 'true') {
+    if (lowStock === 'true') {
         // Find where current quantity is less than or equal to the notifyAt threshold
         filter.$expr = { $lte: ['$quantity', '$notifyAt'] };
-     }
+    }
 
-    // Authorization Filtering:
+    // --- Authorization Filtering (Apply location restrictions) ---
+    let accessibleLocations = null;
     if (req.user.role !== 'admin') {
-        // If a specific location is requested, ensure user has access (middleware might already do this)
-        if (locationId && !req.user.hasAccessToLocation(locationId)) {
-             res.status(403); throw new Error('Forbidden: Access denied to this location inventory');
+        if (!req.user.locations || req.user.locations.length === 0) {
+            // User has access to no locations, return empty results immediately
+            return res.json({ data: [], pagination: { total: 0, page: queryPage, pages: 0, limit: queryLimit } });
         }
-        // If no specific location requested, filter by user's accessible locations
-        else if (!locationId) {
-            if (!req.user.locations || req.user.locations.length === 0) {
-                return res.json([]); // User has access to no locations
-            }
-            filter.location = { $in: req.user.locations };
+        accessibleLocations = req.user.locations; // Get user's allowed locations
+
+        // If a specific location is requested, ensure user has access
+        if (locationId && !accessibleLocations.some(loc => loc.equals(locationId))) {
+            res.status(403); throw new Error('Forbidden: Access denied to this location inventory');
+        }
+        // Apply user's location access to the main filter
+        // Combine with existing location filter if present using $and or simply overwrite/add
+        if (filter.location) { // locationId was provided and is accessible
+            // No change needed, filter.location is already correctly set
+        } else { // No specific locationId requested, filter by all accessible locations
+            filter.location = { $in: accessibleLocations };
         }
     }
 
+    // --- Apply Search Filter (if 'search' query parameter exists) ---
+    if (search) {
+        const searchRegex = { $regex: search, $options: 'i' }; // Case-insensitive regex
+        try {
+            // Find products matching the search term (name or SKU)
+            const matchedProducts = await Product.find({
+                $or: [
+                    { name: searchRegex },
+                    { sku: searchRegex }
+                    // Add other searchable product fields if needed (e.g., description)
+                    // { description: searchRegex }
+                ]
+            }).select('_id'); // Only fetch the IDs
 
-    const inventoryList = await Inventory.find(filter)
-        .populate('product', 'name sku price isActive') // Include isActive status
-        .populate('location', 'name type isActive') // Include isActive status
-        .sort({ 'location.name': 1, 'product.name': 1 }); // Sort by location then product
+            const productIdsToInclude = matchedProducts.map(p => p._id);
 
-    res.json(inventoryList);
+            // If search term exists but no products match, return empty results
+            if (productIdsToInclude.length === 0) {
+                return res.json({
+                    data: [],
+                    pagination: { total: 0, page: queryPage, pages: 0, limit: queryLimit }
+                });
+            }
+
+            // Add the product ID condition to the main filter
+            // If filter.product already exists (from productId query), use $and to combine
+            if (filter.product) {
+                // We need inventory items where the product is BOTH the specific productId
+                // AND in the list of products matching the search.
+                // This means the specific productId MUST be in productIdsToInclude.
+                 if (!productIdsToInclude.some(id => id.equals(filter.product))) {
+                     // The specific product ID doesn't match the search term, so no results.
+                     return res.json({ data: [], pagination: { total: 0, page: queryPage, pages: 0, limit: queryLimit } });
+                 }
+                 // If it does match, filter.product is already correctly set to the specific ID.
+            } else {
+                 // If no specific productId filter was set, filter by all products matching the search.
+                 filter.product = { $in: productIdsToInclude };
+            }
+
+        } catch (error) {
+            console.error("Error during product search:", error);
+            res.status(500);
+            throw new Error("Server error during product search");
+        }
+    }
+
+    // --- Execute Query with Pagination ---
+    try {
+        // Get total count matching the final filter *before* applying limit/skip
+        const totalItems = await Inventory.countDocuments(filter);
+
+        // Find the inventory items matching the filter, apply sorting, skip, and limit
+        const inventoryList = await Inventory.find(filter)
+            .populate({ // Populate product and its category
+                path: 'product',
+                select: 'name sku price imageUrl isActive category', // Include category field
+                populate: { // Nested populate for category name
+                    path: 'category',
+                    select: 'name' // Select only the name of the category
+                }
+            })
+            .populate('location', 'name type isActive') // Populate location
+            .sort({ 'location.name': 1, 'product.name': 1 }) // Default sort
+            .skip(skip)
+            .limit(queryLimit);
+
+        // --- Prepare Paginated Response ---
+        res.json({
+            data: inventoryList, // The items for the current page
+            pagination: {
+                total: totalItems, // Total items matching the filter
+                page: queryPage, // Current page number
+                pages: Math.ceil(totalItems / queryLimit), // Total number of pages
+                limit: queryLimit // Items per page
+            }
+        });
+
+    } catch (error) {
+         console.error("Error fetching inventory list:", error);
+         res.status(500);
+         throw new Error("Server error fetching inventory");
+    }
 });
 
 // @desc    Get a single inventory record by ID
