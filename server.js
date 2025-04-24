@@ -19,6 +19,7 @@ const reportRoutes = require('./routes/reportRoutes');
 const brandRoutes = require('./routes/brandRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const stockAdjustmentRoutes = require('./routes/stockAdjustmentRoutes'); // Added for stock adjustments
 
 const app = express();
 const path = require('path');
@@ -75,6 +76,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/categories', categoryRoutes)
 app.use('/api/upload', uploadRoutes);
+app.use('/api/stock-adjustments', stockAdjustmentRoutes);
 
 
 // Protected Route
