@@ -11,162 +11,210 @@ const mongoose = require('mongoose');
 // @access  Admin, Manager (with location access)
 const createStockAdjustment = asyncHandler(async (req, res) => {
     const {
-        productId,
         locationId,
-        adjustmentType,
-        quantityAdjusted, // Always positive
-        reason, // Notes
-        referenceNumber, // Optional user ref
-        adjustmentDate // Optional: defaults to now if not provided
+        referenceNumber,
+        notes,
+        adjustmentDate,
+        adjustments
     } = req.body;
 
-    // --- Validation ---
-    if (!productId || !locationId || !adjustmentType || quantityAdjusted === undefined || quantityAdjusted === null) {
-        res.status(400); throw new Error('Missing required fields: productId, locationId, adjustmentType, quantityAdjusted');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId) || !mongoose.Types.ObjectId.isValid(locationId)) {
-        res.status(400); throw new Error('Invalid Product or Location ID format');
-    }
-    const qty = Number(quantityAdjusted);
-    if (isNaN(qty) || qty < 0 || !Number.isInteger(qty)) {
-        res.status(400); throw new Error('Quantity adjusted must be a non-negative integer');
-    }
-    if (qty === 0) {
-         res.status(400); throw new Error('Quantity adjusted cannot be zero');
-    }
-     // Validate adjustmentType is in the enum (Mongoose schema validation handles this too, but good practice)
-     const validTypes = StockAdjustment.schema.path('adjustmentType').enumValues;
-     if (!validTypes.includes(adjustmentType)) {
-         res.status(400); throw new Error(`Invalid adjustmentType: ${adjustmentType}. Must be one of: ${validTypes.join(', ')}`);
-     }
-
-    // --- Check User Access ---
-    if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(locationId)) {
-       res.status(403); throw new Error('Forbidden: You do not have permission to adjust stock at this location.');
+    // Validation
+    if (!locationId || !adjustments || !Array.isArray(adjustments) || adjustments.length === 0) {
+        res.status(400);
+        throw new Error('Missing required fields: locationId and adjustments array');
     }
 
-    // --- Find or Create Inventory Record ---
-    // Use a session for transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    if (!mongoose.Types.ObjectId.isValid(locationId)) {
+        res.status(400);
+        throw new Error('Invalid Location ID format');
+    }
 
-    try {
-        let inventory = await Inventory.findOne({ product: productId, location: locationId }).session(session);
-
-        // If inventory record doesn't exist, we generally shouldn't adjust it unless it's an 'Initial Stock' type
-        if (!inventory) {
-             // Option 1: Disallow adjustment if inventory record doesn't exist (safer)
-             // if (adjustmentType !== 'Initial Stock') { // Allow only initial stock if record missing
-                 await session.abortTransaction();
-                 session.endSession();
-                 res.status(404);
-                 throw new Error(`Inventory record not found for this product at this location. Cannot adjust stock.`);
-            // }
-            // Option 2: Create inventory record on the fly (can lead to unintended records)
-            // const product = await Product.findById(productId).session(session);
-            // const location = await Location.findById(locationId).session(session);
-            // if (!product || !location) { throw new Error('Product or Location not found'); }
-            // inventory = new Inventory({ product: productId, location: locationId, quantity: 0, createdBy: req.user.id });
-            // // Add minimal audit log
-            // inventory.auditLog.push({ user: req.user.id, action: 'created_on_adjustment', adjustment: 0, newQuantity: 0, note: 'Created during stock adjustment' });
-        }
-
-        const previousQuantity = inventory.quantity;
-        let change = 0;
-
-        // Determine the actual change based on type
-        if (['Addition', 'Correction', 'Initial Stock', 'Transfer In', 'Return'].includes(adjustmentType)) {
-            change = qty;
-        } else if (['Subtraction', 'Damage', 'Theft', 'Transfer Out'].includes(adjustmentType)) {
-            change = -qty;
-        } else { // 'Other' or future types - default to addition or require specific handling
-            change = qty; // Or throw error if 'Other' needs specific logic
-        }
-
-        const newQuantity = previousQuantity + change;
-
-        // Check for negative stock only if subtracting
-        if (change < 0 && newQuantity < 0) {
-            await session.abortTransaction();
-            session.endSession();
+    // Validate each adjustment
+    for (const adj of adjustments) {
+        if (!adj.productId || !adj.adjustmentType || adj.quantityAdjusted === undefined) {
             res.status(400);
-            throw new Error(`Adjustment results in negative stock (${newQuantity}). Current: ${previousQuantity}, Adjusting by: ${change}`);
+            throw new Error('Each adjustment must contain productId, adjustmentType, and quantityAdjusted');
         }
 
-        // --- Update Inventory ---
-        inventory.quantity = newQuantity;
-        const auditNote = `${adjustmentType}: ${reason || 'No reason specified'}${referenceNumber ? ` (Ref: ${referenceNumber})` : ''}`;
-        // Add to Inventory audit log, referencing the adjustment
-        inventory.auditLog.push({
-            user: req.user.id,
-            action: 'adjustment', // Keep action generic or map from adjustmentType
-            adjustment: change, // The actual +/- value
-            note: auditNote.substring(0, 200), // Limit note length if needed
-            newQuantity: newQuantity,
-            // We will add relatedAdjustmentId after saving the adjustment
-            timestamp: new Date()
-        });
-        const updatedInventory = await inventory.save({ session }); // Save within transaction
+        if (!mongoose.Types.ObjectId.isValid(adj.productId)) {
+            res.status(400);
+            throw new Error(`Invalid Product ID format for product ${adj.productId}`);
+        }
 
-        // --- Create Stock Adjustment Record ---
-        const newAdjustment = new StockAdjustment({
-            product: productId,
-            location: locationId,
-            inventory: updatedInventory._id,
-            adjustmentType,
-            quantityAdjusted: qty, // Store the absolute value
-            previousQuantity,
-            newQuantity,
-            reason: reason,
-            referenceNumber: referenceNumber,
-            adjustedBy: req.user.id,
-            adjustmentDate: adjustmentDate || new Date(), // Use provided date or now
-        });
-        const savedAdjustment = await newAdjustment.save({ session }); // Save within transaction
+        const qty = Number(adj.quantityAdjusted);
+        if (isNaN(qty) || qty < 0 || !Number.isInteger(qty)) {
+            res.status(400);
+            throw new Error('Quantity adjusted must be a non-negative integer');
+        }
 
-        // --- Link Audit Log to Adjustment (Update Inventory Again) ---
-        const auditLogEntry = updatedInventory.auditLog[updatedInventory.auditLog.length - 1]; // Get the last entry
-        auditLogEntry.relatedAdjustmentId = savedAdjustment._id; // Add the reference
-        await updatedInventory.save({ session }); // Save inventory again to include the link
+        if (qty === 0) {
+            res.status(400);
+            throw new Error('Quantity adjusted cannot be zero');
+        }
 
-        // --- Commit Transaction ---
-        await session.commitTransaction();
-        session.endSession();
+        const validTypes = StockAdjustment.schema.path('adjustmentType').enumValues;
+        if (!validTypes.includes(adj.adjustmentType)) {
+            res.status(400);
+            throw new Error(`Invalid adjustmentType: ${adj.adjustmentType}. Must be one of: ${validTypes.join(', ')}`);
+        }
+    }
 
-        // --- Populate and Respond ---
-         const populatedAdjustment = await StockAdjustment.findById(savedAdjustment._id)
-            .populate('product', 'name sku imageUrl')
-            .populate('location', 'name type')
-            .populate('adjustedBy', 'name email'); // Populate user name/email
+    // Check User Access
+    if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(locationId)) {
+        res.status(403);
+        throw new Error('Forbidden: You do not have permission to adjust stock at this location.');
+    }
 
+    let session;
+    try {
+        session = await mongoose.startSession();
+        session.startTransaction();
 
-        // --- Emit Socket Event ---
-        if (req.io) {
-            // Notify about the adjustment itself
-            req.io.to('stock_adjustments').emit('adjustmentCreated', populatedAdjustment);
-            // Notify about the inventory quantity change
-            const populatedInventory = await Inventory.findById(updatedInventory._id)
-                                                        .populate('product', 'name sku')
-                                                        .populate('location', 'name type');
-            if (populatedInventory) {
-                req.io.to(`location_${locationId}`).emit('inventoryAdjusted', populatedInventory);
-                req.io.to('products').emit('inventoryUpdate', populatedInventory);
+        const adjustmentResults = [];
+        const inventoryUpdates = [];
+
+        // Process each adjustment
+        for (const adj of adjustments) {
+            const { productId, adjustmentType, quantityAdjusted, reason } = adj;
+
+            // Find or create inventory record
+            let inventory = await Inventory.findOne({
+                product: productId,
+                location: locationId
+            }).session(session);
+
+            if (!inventory) {
+                // Option 1: Disallow adjustment if inventory record doesn't exist
+                if (adjustmentType !== 'Initial Stock') {
+                    throw new Error(`Inventory record not found for product ${productId} at this location. Cannot adjust stock.`);
+                }
+
+                // Option 2: Create inventory record for initial stock
+                const product = await Product.findById(productId).session(session);
+                const location = await Location.findById(locationId).session(session);
+                if (!product || !location) {
+                    throw new Error('Product or Location not found');
+                }
+
+                inventory = new Inventory({
+                    product: productId,
+                    location: locationId,
+                    quantity: 0,
+                    createdBy: req.user.id
+                });
+                inventory.auditLog.push({
+                    user: req.user.id,
+                    action: 'created_on_adjustment',
+                    adjustment: 0,
+                    newQuantity: 0,
+                    note: 'Created during stock adjustment'
+                });
             }
+
+            const previousQuantity = inventory.quantity;
+            let change = 0;
+
+            // Determine the actual change based on type
+            if (['Addition', 'Correction', 'Initial Stock', 'Transfer In', 'Return'].includes(adjustmentType)) {
+                change = quantityAdjusted;
+            } else if (['Subtraction', 'Damage', 'Theft', 'Transfer Out'].includes(adjustmentType)) {
+                change = -quantityAdjusted;
+            } else {
+                change = quantityAdjusted;
+            }
+
+            const newQuantity = previousQuantity + change;
+
+            // Check for negative stock only if subtracting
+            if (change < 0 && newQuantity < 0) {
+                throw new Error(`Adjustment results in negative stock (${newQuantity}). Current: ${previousQuantity}, Adjusting by: ${change}`);
+            }
+
+            // Update Inventory
+            inventory.quantity = newQuantity;
+            const auditNote = `${adjustmentType}: ${reason || notes || 'No reason specified'}${referenceNumber ? ` (Ref: ${referenceNumber})` : ''}`;
+
+            inventory.auditLog.push({
+                user: req.user.id,
+                action: 'adjustment',
+                adjustment: change,
+                note: auditNote.substring(0, 200),
+                newQuantity: newQuantity,
+                timestamp: new Date()
+            });
+
+            const updatedInventory = await inventory.save({ session });
+            inventoryUpdates.push(updatedInventory);
+
+            // Create Stock Adjustment Record
+            const newAdjustment = new StockAdjustment({
+                product: productId,
+                location: locationId,
+                inventory: updatedInventory._id,
+                adjustmentType,
+                quantityAdjusted: quantityAdjusted,
+                previousQuantity,
+                newQuantity,
+                reason: reason || notes,
+                referenceNumber: referenceNumber,
+                adjustedBy: req.user.id,
+                adjustmentDate: adjustmentDate || new Date(),
+            });
+
+            const savedAdjustment = await newAdjustment.save({ session });
+            adjustmentResults.push(savedAdjustment);
+
+            // Link Audit Log to Adjustment
+            const lastLogEntry = updatedInventory.auditLog[updatedInventory.auditLog.length - 1];
+            lastLogEntry.relatedAdjustmentId = savedAdjustment._id;
+            await updatedInventory.save({ session });
         }
 
-        res.status(201).json(populatedAdjustment);
+        await session.commitTransaction();
+
+        // Populate and return all created adjustments
+        const populatedAdjustments = await StockAdjustment.find({
+            _id: { $in: adjustmentResults.map(a => a._id) }
+        })
+        .populate('product', 'name sku imageUrl')
+        .populate('location', 'name type')
+        .populate('adjustedBy', 'name email');
+
+        // Emit Socket Events
+        if (req.io) {
+            req.io.to('stock_adjustments').emit('adjustmentsCreated', populatedAdjustments);
+
+            const populatedInventories = await Inventory.find({
+                _id: { $in: inventoryUpdates.map(i => i._id) }
+            })
+            .populate('product', 'name sku')
+            .populate('location', 'name type');
+
+            populatedInventories.forEach(inv => {
+                req.io.to(`location_${locationId}`).emit('inventoryAdjusted', inv);
+                req.io.to('products').emit('inventoryUpdate', inv);
+            });
+        }
+
+        res.status(201).json(populatedAdjustments);
 
     } catch (error) {
-        // If anything fails, abort transaction
-        await session.abortTransaction();
-        session.endSession();
+        if (session) {
+            try {
+                await session.abortTransaction();
+            } catch (abortError) {
+                console.error("Error aborting transaction:", abortError);
+            }
+        }
         console.error("Stock Adjustment Error:", error);
-        // Throw error to be caught by global error handler, or send specific response
-        res.status(error.statusCode || 500); // Use status code from error if available
+        res.status(error.statusCode || 500);
         throw new Error(`Failed to create stock adjustment: ${error.message}`);
+    } finally {
+        if (session) {
+            session.endSession();
+        }
     }
 });
-
 
 // @desc    Get all stock adjustments with filtering and pagination
 // @route   GET /api/stock-adjustments
@@ -374,8 +422,6 @@ const deleteStockAdjustment = asyncHandler(async (req, res) => {
     // --- >>> WARNING: THIS IS GENERALLY A BAD IDEA <<< ---
     res.status(403).json({ message: "Deleting historical stock adjustments is disabled for audit integrity. Please create a correcting adjustment instead." });
     return; // Prevent execution
-    // --- >>> END WARNING <<< ---
-
     /*
     // If you MUST enable deletion (e.g., for accidental duplicates created immediately):
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
