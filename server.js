@@ -41,7 +41,7 @@ const io = socketIo(server, {
 // CORS Configuration for Express
 const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:4000',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], // Added PATCH method
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 app.use(cors(corsOptions));
