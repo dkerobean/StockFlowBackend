@@ -6,6 +6,7 @@ const socketIo = require('socket.io'); // Added for real-time
 const connectDB = require('./config/db');
 const { initSocket, getIO } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
+const Expense = require('./models/Expense'); // Added for initializing expense categories
 
 const locationRoutes = require('./routes/locationRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -62,6 +63,10 @@ app.use((req, res, next) => {
 // Database connection
 connectDB();
 
+// Initialize default expense categories
+Expense.initializeCategories().catch(err => {
+    console.error('Error initializing expense categories:', err);
+});
 
 // Routes
 app.use('/api/auth', authRoutes);

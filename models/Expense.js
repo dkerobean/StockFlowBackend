@@ -61,4 +61,27 @@ const expenseSchema = new mongoose.Schema({
 expenseSchema.index({ date: -1 });
 expenseSchema.index({ category: 1 });
 
+const defaultCategories = [
+    'Supplies',
+    'Rent',
+    'Utilities',
+    'Salaries',
+    'Marketing',
+    'Travel',
+    'Equipment',
+    'Software',
+    'Taxes',
+    'Other'
+];
+
+// Add default categories to the database if they don't exist
+expenseSchema.statics.initializeCategories = async function () {
+    const existingCategories = await this.distinct('category');
+    const newCategories = defaultCategories.filter(category => !existingCategories.includes(category));
+
+    if (newCategories.length > 0) {
+        await Promise.all(newCategories.map(category => this.create({ category, description: `${category} expenses`, amount: 0, createdBy: null })));
+    }
+};
+
 module.exports = mongoose.model('Expense', expenseSchema);
