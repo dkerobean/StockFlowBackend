@@ -141,7 +141,7 @@ const getSales = asyncHandler(async (req, res) => {
 
 
     const sales = await Sale.find(filter)
-        .populate('items.product', 'name sku price barcode') // Keep populating item details
+        .populate('items.product', 'name sku price barcode imageUrl') // Include imageUrl
         .populate('location', 'name type') // Populate location details
         .populate('createdBy', 'name email')
         .sort({ createdAt: -1 });
@@ -177,10 +177,22 @@ const getSale = asyncHandler(async (req, res) => {
     res.json(sale);
 });
 
+const updateSale = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const updatedData = req.body;
+
+    const sale = await Sale.findByIdAndUpdate(id, updatedData, { new: true }).populate('items.product', 'name sku barcode');
+    if (!sale) {
+        res.status(404);
+        throw new Error('Sale not found');
+    }
+
+    res.json(sale);
+});
 
 module.exports = {
     createSale,
     getSales,
     getSale,
-    // No longer need the helper exposed if it's internal
+    updateSale, // Add this to exports
 };
