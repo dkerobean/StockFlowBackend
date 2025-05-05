@@ -18,7 +18,6 @@ async function validateSaleItems(items, locationId) {
      const location = await Location.findOne({_id: locationId, isActive: true});
      if (!location) throw new Error(`Active location with ID ${locationId} not found.`);
 
-
     for (const item of items) {
         if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
             throw new Error(`Invalid product ID found in items.`);
@@ -42,7 +41,10 @@ async function validateSaleItems(items, locationId) {
         });
 
         if (!inventory || inventory.quantity < item.quantity) {
-            throw new Error(`Insufficient stock for ${product.name} at ${location.name}. Available: ${inventory?.quantity || 0}`);
+            const productName = product.name || 'Unknown Product';
+            const locationName = location.name || 'Unknown Location';
+            const availableQuantity = inventory?.quantity || 0;
+            throw new Error(`Insufficient stock for ${productName} at ${locationName}. Available: ${availableQuantity}`);
         }
     }
 }
@@ -52,58 +54,62 @@ async function validateSaleItems(items, locationId) {
 // @route   POST /api/sales
 // @access  Staff+ (with location access)
 const createSale = asyncHandler(async (req, res) => {
-    // Get locationId (as ObjectId) instead of enum string
-    const { items, paymentMethod, customer, locationId, notes, tax, discount } = req.body;
+    try {
+        // Get locationId (as ObjectId) instead of enum string
+        const { items, paymentMethod, customer, locationId, notes, tax, discount } = req.body;
 
-    if (!locationId || !mongoose.Types.ObjectId.isValid(locationId)) {
-        res.status(400);
-        throw new Error('Valid Location ID (locationId) is required');
+        if (!locationId || !mongoose.Types.ObjectId.isValid(locationId)) {
+            return res.status(400).json({ message: 'Valid Location ID (locationId) is required' });
+        }
+        if (!paymentMethod) {
+            return res.status(400).json({ message: 'Payment method is required' });
+        }
+
+        // Authorization check (Middleware `hasLocationAccess` should handle this)
+        // if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(locationId)) {
+        //    res.status(403); throw new Error('Forbidden: Access denied to create sales at this location.');
+        // }
+
+        // *** Call the updated validation helper ***
+        await validateSaleItems(items, locationId);
+
+        const sale = new Sale({
+            items,
+            paymentMethod,
+            customer: customer || undefined,
+            location: locationId, // Store the ObjectId
+            notes,
+            tax: tax || 0,
+            discount: discount || 0, // Overall sale discount
+            createdBy: req.user.id
+            // subtotal and total are calculated by pre-save hook
+        });
+
+        // The pre-validate/pre-save hooks in Sale model handle calculations
+        const createdSale = await sale.save();
+
+        // The post-save hook handles inventory update and income creation
+
+        // Populate necessary fields for response
+         const populatedSale = await Sale.findById(createdSale._id)
+            .populate('items.product', 'name sku barcode')
+            .populate('location', 'name type')
+            .populate('createdBy', 'name email');
+
+
+        // Emit real-time updates (using req.io or global io)
+        if (req.io) {
+          req.io.to('sales').to(`location_${locationId}`).emit('newSale', populatedSale);
+          // Inventory updates are now triggered by the post-save hook's emits
+        }
+        // emitNewSale(populatedSale); // Use your existing pattern if preferred
+
+
+        res.status(201).json(populatedSale);
+    } catch (error) {
+        // Send clean error message to client
+        res.status(400).json({ message: error.message });
     }
-     if (!paymentMethod) {
-        res.status(400); throw new Error('Payment method is required');
-     }
-
-    // Authorization check (Middleware `hasLocationAccess` should handle this)
-    // if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(locationId)) {
-    //    res.status(403); throw new Error('Forbidden: Access denied to create sales at this location.');
-    // }
-
-    // *** Call the updated validation helper ***
-    await validateSaleItems(items, locationId);
-
-    const sale = new Sale({
-        items,
-        paymentMethod,
-        customer: customer || undefined,
-        location: locationId, // Store the ObjectId
-        notes,
-        tax: tax || 0,
-        discount: discount || 0, // Overall sale discount
-        createdBy: req.user.id
-        // subtotal and total are calculated by pre-save hook
-    });
-
-    // The pre-validate/pre-save hooks in Sale model handle calculations
-    const createdSale = await sale.save();
-
-    // The post-save hook handles inventory update and income creation
-
-    // Populate necessary fields for response
-     const populatedSale = await Sale.findById(createdSale._id)
-        .populate('items.product', 'name sku barcode')
-        .populate('location', 'name type')
-        .populate('createdBy', 'name email');
-
-
-    // Emit real-time updates (using req.io or global io)
-    if (req.io) {
-      req.io.to('sales').to(`location_${locationId}`).emit('newSale', populatedSale);
-      // Inventory updates are now triggered by the post-save hook's emits
-    }
-    // emitNewSale(populatedSale); // Use your existing pattern if preferred
-
-
-    res.status(201).json(populatedSale);
 });
 
 // @desc    Get all sales

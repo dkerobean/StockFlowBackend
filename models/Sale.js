@@ -38,7 +38,7 @@ const saleSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['pending', 'completed', 'cancelled', 'refunded'],
-    default: 'pending',
+    default: 'completed',
     required: true
   },
   paymentMethod: {
