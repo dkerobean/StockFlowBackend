@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 // Use specific role checks and location access check
 const { verifyToken, isAdmin, isManagerOrAdmin, hasLocationAccess, checkRole } = require('../middleware/authJwt');
-const { createSale, getSales, getSale, updateSale } = require('../controllers/saleController');
+const { createSale, getSales, getSale, updateSale, deleteSale } = require('../controllers/saleController');
 
 // Create a sale (Requires Staff+ role and access to the location specified in body)
 router.post(
@@ -31,5 +31,8 @@ router.get(
 
 // Update a sale (Requires Admin or Manager role)
 router.put('/:id', verifyToken, checkRole(['admin', 'manager']), updateSale);
+
+// Delete a sale (Requires Admin or Manager role)
+router.delete('/:id', verifyToken, checkRole(['admin', 'manager']), deleteSale);
 
 module.exports = router;

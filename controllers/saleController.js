@@ -190,9 +190,51 @@ const updateSale = asyncHandler(async (req, res) => {
     res.json(sale);
 });
 
+// @desc    Delete a sale
+// @route   DELETE /api/sales/:id
+// @access  Manager+ (with location access)
+const deleteSale = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        res.status(400);
+        throw new Error('Invalid Sale ID format');
+    }
+
+    const sale = await Sale.findById(id).populate('location', '_id');
+
+    if (!sale) {
+        res.status(404);
+        throw new Error('Sale not found');
+    }
+
+    // Authorization check: Admin or user with access to the sale's location
+    if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(sale.location._id)) {
+        res.status(403);
+        throw new Error('Forbidden: You do not have access to delete this sale.');
+    }
+
+    try {
+        // Use deleteOne() instead of remove()
+        await Sale.deleteOne({ _id: id });
+
+        // Emit socket event for sale deletion
+        if (req.io) {
+            req.io.to('sales').to(`location_${sale.location._id.toString()}`).emit('saleDeleted', { saleId: id });
+        }
+
+        res.json({ message: 'Sale deleted successfully', saleId: id });
+    } catch (error) {
+        console.error(`Error during sale deletion process for ${id}:`, error);
+        res.status(500);
+        throw new Error(error.message || 'Failed to delete sale due to an internal error.');
+    }
+});
+
 module.exports = {
     createSale,
     getSales,
     getSale,
-    updateSale, // Add this to exports
+    updateSale,
+    deleteSale
 };
