@@ -4,7 +4,6 @@ const Product = require('../models/Product');
 const Inventory = require('../models/Inventory'); // Import Inventory
 const Location = require('../models/Location'); // Import Location
 const mongoose = require('mongoose');
-const Invoice = require('../models/Invoice'); // Import Invoice
 // const { emitNewSale } = require('../socket'); // Keep if you use this pattern
 
 // Helper function to validate sale items against inventory at a specific location
@@ -55,60 +54,62 @@ async function validateSaleItems(items, locationId) {
 // @route   POST /api/sales
 // @access  Staff+ (with location access)
 const createSale = asyncHandler(async (req, res) => {
-    const {
-        customer,
-        items,
-        subtotal,
-        tax,
-        discount,
-        total,
-        paymentMethod,
-        location,
-        notes
-    } = req.body;
+    try {
+        // Get locationId (as ObjectId) instead of enum string
+        const { items, paymentMethod, customer, locationId, notes, tax, discount } = req.body;
 
-    const sale = new Sale({
-        customer,
-        items,
-        subtotal,
-        tax,
-        discount,
-        total,
-        paymentMethod,
-        location,
-        createdBy: req.user._id,
-        notes
-    });
+        if (!locationId || !mongoose.Types.ObjectId.isValid(locationId)) {
+            return res.status(400).json({ message: 'Valid Location ID (locationId) is required' });
+        }
+        if (!paymentMethod) {
+            return res.status(400).json({ message: 'Payment method is required' });
+        }
 
-    const createdSale = await sale.save();
+        // Authorization check (Middleware `hasLocationAccess` should handle this)
+        // if (req.user.role !== 'admin' && !req.user.hasAccessToLocation(locationId)) {
+        //    res.status(403); throw new Error('Forbidden: Access denied to create sales at this location.');
+        // }
 
-    // Create invoice for the sale
-    const invoice = new Invoice({
-        sale: createdSale._id,
-        customer: createdSale.customer,
-        items: createdSale.items.map(item => ({
-            product: item.product,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            discount: item.discount,
-            total: item.price * item.quantity * (1 - item.discount / 100)
-        })),
-        subtotal: createdSale.subtotal,
-        tax: createdSale.tax,
-        discount: createdSale.discount,
-        total: createdSale.total,
-        status: 'Paid',
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-        paymentMethod: createdSale.paymentMethod,
-        location: createdSale.location,
-        createdBy: createdSale.createdBy,
-        notes: createdSale.notes
-    });
+        // *** Call the updated validation helper ***
+        await validateSaleItems(items, locationId);
 
-    await invoice.save();
+        const sale = new Sale({
+            items,
+            paymentMethod,
+            customer: customer || undefined,
+            location: locationId, // Store the ObjectId
+            notes,
+            tax: tax || 0,
+            discount: discount || 0, // Overall sale discount
+            createdBy: req.user.id
+            // subtotal and total are calculated by pre-save hook
+        });
 
-    res.status(201).json(createdSale);
+        // The pre-validate/pre-save hooks in Sale model handle calculations
+        const createdSale = await sale.save();
+
+        // The post-save hook handles inventory update and income creation
+
+        // Populate necessary fields for response
+         const populatedSale = await Sale.findById(createdSale._id)
+            .populate('items.product', 'name sku barcode')
+            .populate('location', 'name type')
+            .populate('createdBy', 'name email');
+
+
+        // Emit real-time updates (using req.io or global io)
+        if (req.io) {
+          req.io.to('sales').to(`location_${locationId}`).emit('newSale', populatedSale);
+          // Inventory updates are now triggered by the post-save hook's emits
+        }
+        // emitNewSale(populatedSale); // Use your existing pattern if preferred
+
+
+        res.status(201).json(populatedSale);
+    } catch (error) {
+        // Send clean error message to client
+        res.status(400).json({ message: error.message });
+    }
 });
 
 // @desc    Get all sales
@@ -184,23 +185,9 @@ const getSale = asyncHandler(async (req, res) => {
 
 const updateSale = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const updatedData = { ...req.body };
+    const updatedData = req.body;
 
-    // Handle customer name update separately
-    if (updatedData.customer && updatedData.customer.name) {
-        updatedData['customer.name'] = updatedData.customer.name;
-        delete updatedData.customer;
-    }
-
-    const sale = await Sale.findByIdAndUpdate(
-        id,
-        { $set: updatedData },
-        { new: true, runValidators: true }
-    )
-    .populate('items.product', 'name sku barcode imageUrl')
-    .populate('location', 'name type')
-    .populate('createdBy', 'name email');
-
+    const sale = await Sale.findByIdAndUpdate(id, updatedData, { new: true }).populate('items.product', 'name sku barcode');
     if (!sale) {
         res.status(404);
         throw new Error('Sale not found');
