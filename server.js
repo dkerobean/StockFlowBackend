@@ -7,6 +7,7 @@ const connectDB = require('./config/db');
 const { initSocket, getIO } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
 const Expense = require('./models/Expense'); // Added for initializing expense categories
+const ExpenseCategory = require('./models/ExpenseCategory');
 
 const locationRoutes = require('./routes/locationRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -18,9 +19,9 @@ const expenseRoutes = require('./routes/expenseRoutes');
 const authRoutes = require('./routes/authRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const brandRoutes = require('./routes/brandRoutes');
-const categoryRoutes = require('./routes/categoryRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const stockAdjustmentRoutes = require('./routes/stockAdjustmentRoutes'); // Added for stock adjustments
+const expenseCategoryRoutes = require('./routes/expenseCategoryRoutes'); // Added for expense categories
 
 const app = express();
 const path = require('path');
@@ -68,6 +69,33 @@ Expense.initializeCategories().catch(err => {
     console.error('Error initializing expense categories:', err);
 });
 
+const defaultCategories = [
+  { name: 'Supplies', description: 'Office and business supplies', isDefault: true },
+  { name: 'Rent', description: 'Office or warehouse rent', isDefault: true },
+  { name: 'Utilities', description: 'Electricity, water, internet, etc.', isDefault: true },
+  { name: 'Salaries', description: 'Employee salaries and wages', isDefault: true },
+  { name: 'Marketing', description: 'Advertising and marketing expenses', isDefault: true },
+  { name: 'Travel', description: 'Business travel expenses', isDefault: true },
+  { name: 'Equipment', description: 'Machinery and equipment', isDefault: true },
+  { name: 'Software', description: 'Software subscriptions and licenses', isDefault: true },
+  { name: 'Taxes', description: 'Business taxes', isDefault: true },
+  { name: 'Other', description: 'Other miscellaneous expenses', isDefault: true }
+];
+
+async function insertDefaultCategories() {
+  for (const cat of defaultCategories) {
+    await ExpenseCategory.updateOne(
+      { name: cat.name, createdBy: null },
+      { $setOnInsert: cat },
+      { upsert: true }
+    );
+  }
+}
+
+connectDB().then(() => {
+  insertDefaultCategories().catch(console.error);
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/locations', locationRoutes);
@@ -79,10 +107,9 @@ app.use('/api/income', incomeRoutes);
 app.use('/api/expense', expenseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/brands', brandRoutes);
-app.use('/api/categories', categoryRoutes)
 app.use('/api/upload', uploadRoutes);
 app.use('/api/stock-adjustments', stockAdjustmentRoutes);
-
+app.use('/api/categories', expenseCategoryRoutes);
 
 // Protected Route
 app.get('/api/protected',

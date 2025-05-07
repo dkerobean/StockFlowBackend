@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Location = require('../models/Location'); // Needed for validating locations on register
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const Category = require('../models/Category');
 
 // Register user
 exports.register = async (req, res) => {
@@ -43,6 +44,25 @@ exports.register = async (req, res) => {
             role: role || 'staff',
             locations: validLocationIds // Assign validated location IDs
         });
+
+        // Create default categories for the new user
+        const defaultCategories = [
+            'General',
+            'Utilities',
+            'Travel',
+            'Supplies',
+            'Other'
+        ];
+        await Promise.all(defaultCategories.map(async (catName) => {
+            try {
+                await Category.create({
+                    name: catName,
+                    createdBy: user._id
+                });
+            } catch (e) {
+                // Ignore duplicate errors (shouldn't happen for new user)
+            }
+        }));
 
         // Generate JWT
         const token = jwt.sign(

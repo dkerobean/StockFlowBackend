@@ -5,30 +5,29 @@ const categorySchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Category name is required'],
-    unique: true,
     trim: true
   },
-  slug: { // <-- ADDED FIELD
-        type: String,
-        trim: true,
-        unique: true, // Slugs must be unique for URLs
-        lowercase: true // Slugs are typically lowercase
-    },
-    status: { // <-- ADDED FIELD
-        type: String,
-        required: true,
-        enum: ['active', 'inactive'], // Restrict possible values
-        default: 'active' // Set a default status
-    },
+  slug: {
+    type: String,
+    trim: true,
+    lowercase: true
+  },
+  status: {
+    type: String,
+    required: true,
+    enum: ['active', 'inactive'],
+    default: 'active'
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true // Or false if anonymous creation is allowed
+    required: true
   },
   // You could add parentCategory for hierarchies later if needed:
   // parentCategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null }
 }, { timestamps: true });
 
-categorySchema.index({ name: 1 });
+// Compound unique index for (name, createdBy)
+categorySchema.index({ name: 1, createdBy: 1 }, { unique: true });
 
 module.exports = mongoose.model('Category', categorySchema);
