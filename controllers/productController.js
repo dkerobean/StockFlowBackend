@@ -343,6 +343,37 @@ const getProducts = asyncHandler(async (req, res) => {
 
     const products = await query.exec();
 
+    // --- *** NEW: Add inventory data to products *** ---
+    if (locationId) {
+        // For POS, we need inventory data for stock checking
+        // Get all inventory records for these products
+        const productIds = products.map(p => p._id);
+        const inventoryRecords = await Inventory.find({
+            product: { $in: productIds }
+        }).populate('location', 'name');
+
+        // Add inventory array to each product
+        const productsWithInventory = products.map(product => {
+            const productObj = product.toObject();
+            productObj.inventory = inventoryRecords.filter(inv =>
+                inv.product.toString() === product._id.toString()
+            );
+
+            // Also add convenience fields for backward compatibility
+            const locationInventory = inventoryRecords.find(inv =>
+                inv.product.toString() === product._id.toString() &&
+                inv.location._id.toString() === locationId
+            );
+
+            productObj.totalStock = locationInventory ? locationInventory.quantity : 0;
+            productObj.sellingPrice = product.price; // Use the base price as selling price
+
+            return productObj;
+        });
+
+        return res.json(productsWithInventory);
+    }
+
     res.json(products);
 });
 
