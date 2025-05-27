@@ -23,6 +23,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const stockAdjustmentRoutes = require('./routes/stockAdjustmentRoutes'); // Added for stock adjustments
 const expenseCategoryRoutes = require('./routes/expenseCategoryRoutes'); // Added for expense categories
 const incomeCategoryRoutes = require('./routes/incomeCategoryRoutes'); // Added for income categories
+const supplierRoutes = require('./routes/supplierRoutes');
 
 const app = express();
 const path = require('path');
@@ -112,6 +113,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/stock-adjustments', stockAdjustmentRoutes);
 app.use('/api/categories', expenseCategoryRoutes);
 app.use('/api/income-categories', incomeCategoryRoutes);
+app.use('/api/suppliers', supplierRoutes);
 
 // Protected Route
 app.get('/api/protected',
