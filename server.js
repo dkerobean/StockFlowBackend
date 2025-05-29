@@ -8,6 +8,7 @@ const { initSocket, getIO } = require('./socket');
 const { startScheduler } = require('./services/notificationService');
 const Expense = require('./models/Expense'); // Added for initializing expense categories
 const ExpenseCategory = require('./models/ExpenseCategory');
+const ProductCategory = require('./models/ProductCategory'); // Add this line
 
 const locationRoutes = require('./routes/locationRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -24,6 +25,7 @@ const stockAdjustmentRoutes = require('./routes/stockAdjustmentRoutes'); // Adde
 const expenseCategoryRoutes = require('./routes/expenseCategoryRoutes'); // Added for expense categories
 const incomeCategoryRoutes = require('./routes/incomeCategoryRoutes'); // Added for income categories
 const supplierRoutes = require('./routes/supplierRoutes');
+const productCategoryRoutes = require('./routes/productCategoryRoutes'); // Add this line
 
 const app = express();
 const path = require('path');
@@ -94,8 +96,32 @@ async function insertDefaultCategories() {
   }
 }
 
+const defaultProductCategories = [
+  { name: 'Electronics', description: 'Electronic devices and accessories', isDefault: true },
+  { name: 'Clothing', description: 'Apparel and fashion items', isDefault: true },
+  { name: 'Food & Beverages', description: 'Food and drink products', isDefault: true },
+  { name: 'Home & Kitchen', description: 'Home goods and kitchen items', isDefault: true },
+  { name: 'Beauty & Personal Care', description: 'Beauty and personal care products', isDefault: true },
+  { name: 'Sports & Outdoors', description: 'Sports equipment and outdoor gear', isDefault: true },
+  { name: 'Books & Media', description: 'Books, movies, and other media', isDefault: true },
+  { name: 'Toys & Games', description: 'Toys and games for all ages', isDefault: true },
+  { name: 'Health & Wellness', description: 'Health and wellness products', isDefault: true },
+  { name: 'Other', description: 'Other miscellaneous products', isDefault: true }
+];
+
+async function insertDefaultProductCategories() {
+  for (const cat of defaultProductCategories) {
+    await ProductCategory.updateOne(
+      { name: cat.name, createdBy: null },
+      { $setOnInsert: cat },
+      { upsert: true }
+    );
+  }
+}
+
 connectDB().then(() => {
   insertDefaultCategories().catch(console.error);
+  insertDefaultProductCategories().catch(console.error);
 });
 
 // Routes
@@ -113,6 +139,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/stock-adjustments', stockAdjustmentRoutes);
 app.use('/api/categories', expenseCategoryRoutes);
 app.use('/api/income-categories', incomeCategoryRoutes);
+app.use('/api/product-categories', productCategoryRoutes);
 app.use('/api/suppliers', supplierRoutes);
 
 // Protected Route

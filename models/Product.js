@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const productSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Product name is required'],
+    required: true,
     trim: true
   },
   description: {
@@ -21,33 +21,31 @@ const productSchema = new mongoose.Schema({
   },
   sku: {
     type: String,
+    required: true,
     unique: true,
-    trim: true,
-    default: () => uuidv4()
+    trim: true
   },
   category: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Category',
-    required: [true, 'Product category is required'] // Category is required
+    ref: 'ProductCategory',
+    required: true
   },
   brand: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Brand',
-    required: false                    
+    ref: 'Brand'
   },
-  price: { // Base selling price
+  price: {
     type: Number,
-    min: [0.01, 'Price must be at least 0.01'],
     required: true,
-    set: v => parseFloat(v.toFixed(2))
+    min: 0
   },
   barcode: {
     type: String,
-    unique: true, // Ensure barcodes are unique across all products
-    trim: true,
-    sparse: true // Allow multiple products without a barcode
+    unique: true,
+    sparse: true,
+    trim: true
   },
-  isActive: { // To phase out a product without deleting inventory records
+  isActive: {
     type: Boolean,
     default: true
   },
@@ -64,12 +62,11 @@ const productSchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
-// Indexes (Updated for ObjectId refs)
-productSchema.index({ name: 1 });
-productSchema.index({ sku: 1 });
-productSchema.index({ category: 1 }); // Now indexes the ObjectId ref
-productSchema.index({ brand: 1 });   // Now indexes the ObjectId ref
-productSchema.index({ barcode: 1 });
+// Create indexes for faster queries
+productSchema.index({ name: 1, createdBy: 1 });
+productSchema.index({ sku: 1 }, { unique: true });
+productSchema.index({ barcode: 1 }, { unique: true, sparse: true });
+productSchema.index({ category: 1 });
 
 // Method to get total stock across all locations
 productSchema.methods.getTotalStock = async function() {
