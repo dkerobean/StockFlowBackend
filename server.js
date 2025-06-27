@@ -68,10 +68,7 @@ app.use((req, res, next) => {
 // Database connection
 connectDB();
 
-// Initialize default expense categories
-Expense.initializeCategories().catch(err => {
-    console.error('Error initializing expense categories:', err);
-});
+// Remove problematic expense initialization - handled by ExpenseCategory model instead
 
 const defaultCategories = [
   { name: 'Supplies', description: 'Office and business supplies', isDefault: true },
@@ -111,18 +108,27 @@ const defaultProductCategories = [
 
 async function insertDefaultProductCategories() {
   for (const cat of defaultProductCategories) {
+    // Generate slug from name for uniqueness
+    const slug = cat.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     await ProductCategory.updateOne(
       { name: cat.name, createdBy: null },
-      { $setOnInsert: cat },
+      { $setOnInsert: { ...cat, slug } },
       { upsert: true }
     );
   }
 }
 
-connectDB().then(() => {
-  insertDefaultCategories().catch(console.error);
-  insertDefaultProductCategories().catch(console.error);
-});
+// Initialize default data after database connection
+connectDB().then(async () => {
+  try {
+    await insertDefaultCategories();
+    console.log('✅ Default expense categories initialized');
+    await insertDefaultProductCategories();
+    console.log('✅ Default product categories initialized');
+  } catch (error) {
+    console.error('Error initializing default data:', error);
+  }
+}).catch(console.error);
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -159,6 +165,20 @@ io.on('connection', (socket) => {
   });
 });
 
+// Initialize Socket.io with error handling
+initSocket(io);
+
+// Start notification scheduler with error handling
+try {
+  startScheduler();
+  console.log('✅ Notification scheduler started');
+} catch (error) {
+  console.error('Failed to start notification scheduler:', error);
+}
+
 // Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log('✅ StockFlow Backend Ready');
+});

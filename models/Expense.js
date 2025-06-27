@@ -74,14 +74,6 @@ const defaultCategories = [
     'Other'
 ];
 
-// Add default categories to the database if they don't exist
-expenseSchema.statics.initializeCategories = async function () {
-    const existingCategories = await this.distinct('category');
-    const newCategories = defaultCategories.filter(category => !existingCategories.includes(category));
-
-    if (newCategories.length > 0) {
-        await Promise.all(newCategories.map(category => this.create({ category, description: `${category} expenses`, amount: 0, createdBy: null })));
-    }
-};
+// Remove problematic initializeCategories method - categories are managed by ExpenseCategory model
 
 module.exports = mongoose.model('Expense', expenseSchema);

@@ -51,19 +51,25 @@ const templateSource = fs.readFileSync(
 const template = compile(templateSource);
 
 exports.sendLowStockEmail = async (product, recipients) => {
+  // Check if email service is properly configured
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    console.warn('Email service not configured - skipping email notification');
+    return { skipped: true, reason: 'Email service not configured' };
+  }
+
   // Template data remains the same
   const html = template({
     productName: product.name,
     currentStock: product.quantity,
     threshold: product.notifyAt,
     productLink: `${process.env.CLIENT_URL}/products/${product._id}`,
-    supportEmail: process.env.SUPPORT_EMAIL || 'support@yourverifieddomain.com' // Use verified domain as default fallback if needed
+    supportEmail: process.env.SUPPORT_EMAIL || 'support@yourverifieddomain.com'
   });
 
   try {
     // Use resend.emails.send()
     const { data, error } = await resend.emails.send({
-      from: `StockFlow Alerts <${process.env.EMAIL_FROM}>`, // Use EMAIL_FROM from .env (verified domain)
+      from: process.env.EMAIL_FROM, // Use EMAIL_FROM from .env (verified domain)
       to: recipients.map(u => u.email), // Pass emails as an array
       subject: `Low Stock Alert: ${product.name}`,
       html: html // Pass the compiled HTML
@@ -71,7 +77,11 @@ exports.sendLowStockEmail = async (product, recipients) => {
 
     if (error) {
       console.error('Error sending email via Resend:', error);
-      // You might want to throw the error or handle it more gracefully
+      // Don't throw on rate limiting or domain verification errors to prevent crash
+      if (error.name === 'rate_limit_exceeded' || error.statusCode === 403) {
+        console.warn('Email service issue - continuing without email notification');
+        return { skipped: true, reason: error.message || 'Email service issue' };
+      }
       throw new Error(`Failed to send low stock email: ${error.message}`);
     }
 
@@ -80,7 +90,11 @@ exports.sendLowStockEmail = async (product, recipients) => {
 
   } catch (err) {
     console.error('Exception caught while sending email:', err);
-    // Re-throw or handle the error as appropriate for your application
+    // For non-critical errors, don't crash the application
+    if (err.message.includes('rate_limit_exceeded') || err.message.includes('domain is not verified')) {
+      console.warn('Email service issue - continuing without email notification');
+      return { skipped: true, reason: err.message };
+    }
     throw err;
   }
 };

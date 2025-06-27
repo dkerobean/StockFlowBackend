@@ -16,31 +16,44 @@ async function checkLowStock() {
     const admins = await User.find({ role: 'admin' });
     const io = getIO();
 
-    await Promise.all(products.map(async (product) => {
-      // Send email notification
-      await sendLowStockEmail(product, admins);
+    // Process notifications with rate limiting for email service
+    for (const product of products) {
+      try {
+        // Send email notification with retry logic
+        await sendLowStockEmail(product, admins);
+        
+        // Update product record
+        product.lastNotified = new Date();
+        if (product.auditLog) {
+          product.auditLog.push({
+            user: null, // System-generated
+            action: 'low_stock_notification',
+            details: {
+              recipients: admins.map(a => a.email),
+              quantity: product.quantity,
+              threshold: product.notifyAt
+            }
+          });
+        }
+        await product.save();
 
-      // Update product record
-      product.lastNotified = new Date();
-      product.auditLog.push({
-        user: null, // System-generated
-        action: 'low_stock_notification',
-        details: {
-          recipients: admins.map(a => a.email),
+        // Send real-time alert
+        io.emit('low_stock', {
+          productId: product._id,
+          name: product.name,
           quantity: product.quantity,
           threshold: product.notifyAt
-        }
-      });
-      await product.save();
+        });
 
-      // Send real-time alert
-      io.emit('low_stock', {
-        productId: product._id,
-        name: product.name,
-        quantity: product.quantity,
-        threshold: product.notifyAt
-      });
-    }));
+        // Add delay to avoid rate limiting (2 requests per second max)
+        if (products.indexOf(product) < products.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 600)); // 600ms delay
+        }
+      } catch (emailError) {
+        console.error(`Failed to send notification for product ${product.name}:`, emailError.message);
+        // Continue with other products even if one fails
+      }
+    }
 
     console.log(`Processed ${products.length} low stock notifications`);
   } catch (error) {
