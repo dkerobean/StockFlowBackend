@@ -25,7 +25,9 @@ const stockAdjustmentRoutes = require('./routes/stockAdjustmentRoutes'); // Adde
 const expenseCategoryRoutes = require('./routes/expenseCategoryRoutes'); // Added for expense categories
 const incomeCategoryRoutes = require('./routes/incomeCategoryRoutes'); // Added for income categories
 const supplierRoutes = require('./routes/supplierRoutes');
+const customerRoutes = require('./routes/customerRoutes');
 const productCategoryRoutes = require('./routes/productCategoryRoutes'); // Add this line
+const purchaseRoutes = require('./routes/purchaseRoutes');
 
 const app = express();
 const path = require('path');
@@ -147,6 +149,8 @@ app.use('/api/categories', expenseCategoryRoutes);
 app.use('/api/income-categories', incomeCategoryRoutes);
 app.use('/api/product-categories', productCategoryRoutes);
 app.use('/api/suppliers', supplierRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/purchases', purchaseRoutes);
 
 // Protected Route
 app.get('/api/protected',

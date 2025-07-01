@@ -116,18 +116,47 @@ const createSale = asyncHandler(async (req, res) => {
 // @route   GET /api/sales
 // @access  Manager+ (filtered by access)
 const getSales = asyncHandler(async (req, res) => {
-    const { startDate, endDate, locationId } = req.query; // Use locationId
+    const { startDate, endDate, locationId, customer, status, paymentMethod, reference } = req.query;
     const filter = {};
 
+    // Date range filtering
     if (startDate || endDate) {
         filter.createdAt = {};
         if (startDate) filter.createdAt.$gte = new Date(startDate);
         if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999)); // Include whole end day
     }
 
+    // Location filtering
     if (locationId) {
          if (!mongoose.Types.ObjectId.isValid(locationId)) {res.status(400); throw new Error('Invalid Location ID');}
          filter.location = locationId;
+    }
+
+    // Customer name filtering (case-insensitive partial match)
+    if (customer) {
+        filter['customer.name'] = { $regex: customer, $options: 'i' };
+    }
+
+    // Status filtering
+    if (status) {
+        filter.status = status;
+    }
+
+    // Payment method filtering
+    if (paymentMethod) {
+        filter.paymentMethod = paymentMethod;
+    }
+
+    // Reference filtering (search in sale ID)
+    if (reference) {
+        // For ObjectId, we need to use a different approach
+        // Try exact match first, then partial match with aggregation pipeline if needed
+        if (mongoose.Types.ObjectId.isValid(reference)) {
+            filter._id = reference;
+        } else {
+            // For partial matches, we'll use aggregation pipeline later
+            // For now, skip this filter if it's not a valid ObjectId
+        }
     }
 
     // Authorization Filtering: Admins see all. Managers see sales only for their locations.

@@ -6,6 +6,9 @@ const locationController = require('../controllers/locationController');
 // Create Location
 router.post('/', verifyToken, isManagerOrAdmin, locationController.createLocation);
 
+// Get Location Statistics
+router.get('/stats', verifyToken, locationController.getLocationStats);
+
 // Get All Locations (active by default)
 router.get('/', verifyToken, locationController.getLocations);
 
