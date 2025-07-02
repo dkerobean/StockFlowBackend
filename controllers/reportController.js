@@ -7,6 +7,7 @@ const Income = require('../models/Income');
 const Expense = require('../models/Expense');
 const Product = require('../models/Product');
 const Location = require('../models/Location');
+const Customer = require('../models/Customer');
 
 // --- PDF/Excel Generation Helpers
 const PdfPrinter = require('pdfmake');
@@ -522,6 +523,201 @@ exports.getExpenseReport = asyncHandler(async (req, res) => {
         await generateExcel(columns, reportData, 'expense_report', 'Expenses', res);
     } else {
         res.json(expenseData); // Send aggregated data
+    }
+});
+
+// @desc    Get Sales Report
+// @route   GET /api/reports/sales
+// @access  Admin, Manager
+exports.getSalesReport = asyncHandler(async (req, res) => {
+    const { 
+        startDate, 
+        endDate, 
+        locationId, 
+        customerId, 
+        status, 
+        paymentMethod,
+        format = 'json',
+        limit = 100,
+        page = 1
+    } = req.query;
+
+    // Build filter
+    const filter = {};
+    
+    // Date filter using createdAt (sales timestamp)
+    if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) {
+            filter.createdAt.$gte = new Date(new Date(startDate).setHours(0, 0, 0, 0));
+        }
+        if (endDate) {
+            filter.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+        }
+    }
+
+    // Apply location filter with role-based access
+    const hasAccess = applyLocationFilter(filter, req, 'locationId');
+    if (!hasAccess && filter.location?.$in?.length === 0) {
+        if (format === 'json') return res.json({ sales: [], summary: {}, pagination: {} });
+        else return res.status(403).json({ message: 'No locations accessible for this report.' });
+    }
+
+    // Additional filters
+    if (customerId) {
+        if (!mongoose.Types.ObjectId.isValid(customerId)) {
+            res.status(400);
+            throw new Error('Invalid Customer ID format');
+        }
+        filter.customer = customerId;
+    }
+    
+    if (status) {
+        filter.status = status;
+    }
+    
+    if (paymentMethod) {
+        filter.paymentMethod = paymentMethod;
+    }
+
+    // For pagination (only applies to JSON format)
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get total count for pagination
+    const totalCount = await Sale.countDocuments(filter);
+
+    // Fetch sales data
+    let salesQuery = Sale.find(filter)
+        .populate('customer', 'name email phone type')
+        .populate('location', 'name type')
+        .populate('items.product', 'name sku')
+        .sort({ createdAt: -1 });
+
+    // Apply pagination only for JSON format
+    if (format === 'json') {
+        salesQuery = salesQuery.skip(skip).limit(parseInt(limit));
+    }
+
+    const sales = await salesQuery;
+
+    // Calculate summary statistics
+    const summaryData = await Sale.aggregate([
+        { $match: filter },
+        {
+            $group: {
+                _id: null,
+                totalSales: { $sum: 1 },
+                totalRevenue: { $sum: '$total' },
+                totalItemsSold: { $sum: { $sum: '$items.quantity' } },
+                avgOrderValue: { $avg: '$total' }
+            }
+        }
+    ]);
+
+    const summary = summaryData.length > 0 ? {
+        totalSales: summaryData[0].totalSales,
+        totalRevenue: parseFloat(summaryData[0].totalRevenue.toFixed(2)),
+        totalItemsSold: summaryData[0].totalItemsSold,
+        avgOrderValue: parseFloat(summaryData[0].avgOrderValue.toFixed(2))
+    } : {
+        totalSales: 0,
+        totalRevenue: 0,
+        totalItemsSold: 0,
+        avgOrderValue: 0
+    };
+
+    // Prepare data for export formats
+    const reportData = sales.map(sale => ({
+        saleId: sale.saleId || sale._id,
+        date: sale.createdAt.toLocaleDateString(),
+        customerName: sale.customer?.name || 'Walk-in Customer',
+        customerType: sale.customer?.type || 'Individual',
+        locationName: sale.location?.name || 'N/A',
+        itemsCount: sale.items.length,
+        totalQuantity: sale.items.reduce((sum, item) => sum + item.quantity, 0),
+        subtotal: parseFloat(sale.subtotal?.toFixed(2) || 0),
+        tax: parseFloat(sale.tax?.toFixed(2) || 0),
+        discount: parseFloat(sale.discount?.toFixed(2) || 0),
+        total: parseFloat(sale.total.toFixed(2)),
+        paymentMethod: sale.paymentMethod || 'N/A',
+        status: sale.status || 'completed',
+        notes: sale.notes || ''
+    }));
+
+    if (format === 'pdf') {
+        const body = [
+            ['Sale ID', 'Date', 'Customer', 'Location', 'Items', 'Total', 'Payment', 'Status']
+        ];
+        reportData.forEach(sale => {
+            body.push([
+                sale.saleId,
+                sale.date,
+                sale.customerName,
+                sale.locationName,
+                sale.itemsCount,
+                `$${sale.total}`,
+                sale.paymentMethod,
+                sale.status
+            ]);
+        });
+
+        // Add summary row
+        body.push(['', '', '', '', '', '', '', '']);
+        body.push(['SUMMARY', '', `Sales: ${summary.totalSales}`, `Revenue: $${summary.totalRevenue}`, `Items: ${summary.totalItemsSold}`, `Avg: $${summary.avgOrderValue}`, '', '']);
+
+        const docDefinition = {
+            content: [
+                { text: 'Sales Report', style: 'header' },
+                { text: `Generated on: ${new Date().toLocaleDateString()}`, margin: [0, 0, 0, 5] },
+                { text: `Period: ${startDate || 'All'} to ${endDate || 'All'}`, style: 'subheader' },
+                {
+                    table: {
+                        headerRows: 1,
+                        widths: ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto'],
+                        body: body
+                    },
+                    layout: 'lightHorizontalLines'
+                }
+            ],
+            styles: {
+                header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] },
+                subheader: { fontSize: 12, italics: true, margin: [0, 0, 0, 15] }
+            }
+        };
+        generatePdf(docDefinition, 'sales_report', res);
+
+    } else if (format === 'excel') {
+        const columns = [
+            { header: 'Sale ID', key: 'saleId', width: 15 },
+            { header: 'Date', key: 'date', width: 12 },
+            { header: 'Customer', key: 'customerName', width: 25 },
+            { header: 'Customer Type', key: 'customerType', width: 15 },
+            { header: 'Location', key: 'locationName', width: 20 },
+            { header: 'Items Count', key: 'itemsCount', width: 12 },
+            { header: 'Total Quantity', key: 'totalQuantity', width: 15 },
+            { header: 'Subtotal', key: 'subtotal', width: 12, style: { numFmt: '$#,##0.00' } },
+            { header: 'Tax', key: 'tax', width: 10, style: { numFmt: '$#,##0.00' } },
+            { header: 'Discount', key: 'discount', width: 12, style: { numFmt: '$#,##0.00' } },
+            { header: 'Total', key: 'total', width: 12, style: { numFmt: '$#,##0.00' } },
+            { header: 'Payment Method', key: 'paymentMethod', width: 15 },
+            { header: 'Status', key: 'status', width: 12 },
+            { header: 'Notes', key: 'notes', width: 30 }
+        ];
+        await generateExcel(columns, reportData, 'sales_report', 'Sales Report', res);
+
+    } else { // Default to JSON
+        const pagination = {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(totalCount / parseInt(limit)),
+            totalRecords: totalCount,
+            limit: parseInt(limit)
+        };
+
+        res.json({
+            sales,
+            summary,
+            pagination
+        });
     }
 });
 
