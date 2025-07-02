@@ -5,6 +5,8 @@ const {
   createProduct,
   updateProduct,
   deleteProduct,
+  permanentDeleteProduct,
+  reactivateProduct,
   getProducts,
   getProductById
 } = require('../controllers/productController');
@@ -15,6 +17,12 @@ router.put('/:id', verifyToken, isManagerOrAdmin, updateProduct);
 
 // Use isAdmin for the soft delete operation
 router.delete('/:id', verifyToken, isAdmin, deleteProduct);
+
+// Use isAdmin for permanent delete operation (more restrictive)
+router.delete('/:id/permanent', verifyToken, isAdmin, permanentDeleteProduct);
+
+// Use isManagerOrAdmin for reactivation
+router.patch('/:id/reactivate', verifyToken, isManagerOrAdmin, reactivateProduct);
 
 // Any authenticated user can get product definitions
 router.get('/', verifyToken, getProducts);

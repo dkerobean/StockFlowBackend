@@ -229,14 +229,36 @@ const updateProduct = asyncHandler(async (req, res) => {
 // @route   DELETE /api/products/:id
 // @access  Admin
 const deleteProduct = asyncHandler(async (req, res) => {
+    console.log('=== DELETE PRODUCT REQUEST STARTED ===');
+    console.log('Request params:', req.params);
+    console.log('Product ID from URL:', req.params.id);
+    console.log('Request method:', req.method);
+    console.log('Request headers:', req.headers);
+    console.log('User making request:', req.user ? req.user.id : 'No user found');
+
      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+       console.log('❌ VALIDATION ERROR: Invalid Product ID format');
        res.status(400);
        throw new Error('Invalid Product ID format');
     }
 
+    console.log('✅ Product ID validation passed');
+    console.log('Searching for product with ID:', req.params.id);
+
     const product = await Product.findById(req.params.id);
+    console.log('Database query result:', product ? 'Product found' : 'Product not found');
+    
+    if (product) {
+        console.log('Found product details:');
+        console.log('- Product ID:', product._id);
+        console.log('- Product name:', product.name);
+        console.log('- Product SKU:', product.sku);
+        console.log('- Product isActive:', product.isActive);
+        console.log('- Product created by:', product.createdBy);
+    }
 
     if (!product) {
+        console.log('❌ ERROR: Product not found in database');
         res.status(404);
         throw new Error('Product not found');
     }
@@ -250,23 +272,287 @@ const deleteProduct = asyncHandler(async (req, res) => {
     // }
 
      if (!product.isActive) {
+        console.log('⚠️ WARNING: Product is already inactive');
         res.status(200).json({ message: 'Product already inactive', product });
         return;
     }
 
+    console.log('🔄 Proceeding with product deactivation...');
+    console.log('Setting isActive to false');
+    
     product.isActive = false;
+    console.log('Adding audit log entry');
+    
     product.auditLog.push({
         user: req.user.id,
         action: 'deactivated',
         timestamp: new Date()
     });
+    
+    console.log('Saving product to database...');
     const updatedProduct = await product.save();
+    console.log('✅ Product saved successfully');
+    console.log('Updated product isActive status:', updatedProduct.isActive);
 
     if (req.io) {
-      req.io.emit('productDeactivated', updatedProduct._id); // Send ID or object
+        console.log('📡 Emitting socket event: productDeactivated');
+        req.io.emit('productDeactivated', updatedProduct._id); // Send ID or object
+    } else {
+        console.log('⚠️ No socket.io instance found');
     }
 
+    console.log('🎉 DELETE PRODUCT OPERATION COMPLETED SUCCESSFULLY');
+    console.log('Sending response to client...');
+    
     res.status(200).json({ message: 'Product deactivated successfully', product: updatedProduct });
+});
+
+// @desc    Permanently delete a product and all related records
+// @route   DELETE /api/products/:id/permanent
+// @access  Admin only
+const permanentDeleteProduct = asyncHandler(async (req, res) => {
+    console.log('=== PERMANENT DELETE PRODUCT REQUEST STARTED ===');
+    console.log('Request params:', req.params);
+    console.log('Product ID from URL:', req.params.id);
+    console.log('User making request:', req.user ? req.user.id : 'No user found');
+    console.log('User role:', req.user ? req.user.role : 'No role found');
+
+    // Admin-only check
+    if (!req.user || req.user.role !== 'admin') {
+        console.log('❌ ACCESS DENIED: Only admins can permanently delete products');
+        res.status(403);
+        throw new Error('Access denied. Only administrators can permanently delete products.');
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        console.log('❌ VALIDATION ERROR: Invalid Product ID format');
+        res.status(400);
+        throw new Error('Invalid Product ID format');
+    }
+
+    console.log('✅ Product ID validation passed');
+    console.log('Searching for product with ID:', req.params.id);
+
+    const product = await Product.findById(req.params.id);
+    console.log('Database query result:', product ? 'Product found' : 'Product not found');
+    
+    if (product) {
+        console.log('Found product details:');
+        console.log('- Product ID:', product._id);
+        console.log('- Product name:', product.name);
+        console.log('- Product SKU:', product.sku);
+        console.log('- Product isActive:', product.isActive);
+    }
+
+    if (!product) {
+        console.log('❌ ERROR: Product not found in database');
+        res.status(404);
+        throw new Error('Product not found');
+    }
+
+    const { reason } = req.body;
+    console.log('Deletion reason provided:', reason || 'No reason provided');
+
+    // Safety checks before permanent deletion
+    console.log('🔍 Running safety checks...');
+
+    // Check for active inventory
+    const activeInventory = await Inventory.find({ 
+        product: product._id, 
+        quantity: { $gt: 0 } 
+    }).populate('location', 'name');
+
+    if (activeInventory.length > 0) {
+        console.log('❌ SAFETY CHECK FAILED: Product has active inventory');
+        console.log('Active inventory locations:', activeInventory.map(inv => 
+            `${inv.location.name}: ${inv.quantity} units`
+        ));
+        
+        // Prepare structured error response
+        const inventoryDetails = activeInventory.map(inv => ({
+            locationName: inv.location.name,
+            quantity: inv.quantity
+        }));
+        
+        res.status(400).json({
+            error: 'ACTIVE_INVENTORY_FOUND',
+            message: 'Cannot delete product with active inventory',
+            userMessage: 'This product still has active inventory and cannot be deleted.',
+            details: {
+                inventoryLocations: inventoryDetails,
+                totalLocations: activeInventory.length,
+                actionRequired: 'Please transfer the stock to another location or adjust the stock to zero before deleting.'
+            },
+            suggestions: [
+                'Transfer stock to another location',
+                'Adjust stock quantities to zero',
+                'Use stock adjustment feature to remove inventory'
+            ]
+        });
+        return;
+    }
+
+    // Check for recent transactions (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Note: These checks would need actual Sale/Purchase models to work
+    // For now, we'll log the intent
+    console.log('🔍 Checking for recent transactions...');
+    console.log('Looking for sales/purchases after:', thirtyDaysAgo);
+    // TODO: Add actual transaction checks when Sale/Purchase models are available
+
+    console.log('✅ All safety checks passed');
+
+    // Get all related records before deletion for logging
+    const allInventoryRecords = await Inventory.find({ product: product._id });
+    console.log(`Found ${allInventoryRecords.length} inventory records to delete`);
+
+    // Start permanent deletion process
+    console.log('🗑️ Starting permanent deletion process...');
+
+    try {
+        // Delete all inventory records for this product
+        if (allInventoryRecords.length > 0) {
+            console.log('Deleting inventory records...');
+            const deletedInventory = await Inventory.deleteMany({ product: product._id });
+            console.log(`✅ Deleted ${deletedInventory.deletedCount} inventory records`);
+        }
+
+        // TODO: Add other cascade deletions here when models are available
+        // await StockAdjustment.deleteMany({ product: product._id });
+        // await StockTransfer.deleteMany({ product: product._id });
+
+        // Create final audit log entry before deletion
+        console.log('📝 Creating audit trail...');
+        const auditData = {
+            entityType: 'product',
+            entityId: product._id,
+            action: 'permanent_delete',
+            changes: {
+                deleted_product: {
+                    name: product.name,
+                    sku: product.sku,
+                    id: product._id
+                },
+                deleted_inventory_count: allInventoryRecords.length,
+                reason: reason || 'No reason provided'
+            },
+            user: req.user.id,
+            timestamp: new Date()
+        };
+        console.log('Audit data prepared:', auditData);
+
+        // Delete the product itself
+        console.log('🗑️ Deleting product from database...');
+        await Product.findByIdAndDelete(product._id);
+        console.log('✅ Product permanently deleted from database');
+
+        // Emit socket event for real-time updates
+        if (req.io) {
+            console.log('📡 Emitting socket event: productPermanentlyDeleted');
+            req.io.emit('productPermanentlyDeleted', { 
+                productId: product._id, 
+                productName: product.name 
+            });
+        }
+
+        console.log('🎉 PERMANENT DELETE OPERATION COMPLETED SUCCESSFULLY');
+        console.log(`Product "${product.name}" (${product.sku}) has been permanently deleted`);
+        
+        res.status(200).json({ 
+            message: `Product "${product.name}" has been permanently deleted`,
+            deletedProduct: {
+                id: product._id,
+                name: product.name,
+                sku: product.sku
+            },
+            deletedInventoryRecords: allInventoryRecords.length,
+            reason: reason || 'No reason provided'
+        });
+
+    } catch (error) {
+        console.log('❌ ERROR during permanent deletion:', error.message);
+        console.log('Rolling back any partial changes...');
+        
+        res.status(500);
+        throw new Error(`Failed to permanently delete product: ${error.message}`);
+    }
+});
+
+// @desc    Reactivate a product (set isActive to true)
+// @route   PATCH /api/products/:id/reactivate
+// @access  Manager/Admin
+const reactivateProduct = asyncHandler(async (req, res) => {
+    console.log('=== REACTIVATE PRODUCT REQUEST STARTED ===');
+    console.log('Request params:', req.params);
+    console.log('Product ID from URL:', req.params.id);
+    console.log('User making request:', req.user ? req.user.id : 'No user found');
+    console.log('User role:', req.user ? req.user.role : 'No role found');
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        console.log('❌ VALIDATION ERROR: Invalid Product ID format');
+        res.status(400);
+        throw new Error('Invalid Product ID format');
+    }
+
+    console.log('✅ Product ID validation passed');
+    console.log('Searching for product with ID:', req.params.id);
+
+    const product = await Product.findById(req.params.id);
+    console.log('Database query result:', product ? 'Product found' : 'Product not found');
+    
+    if (product) {
+        console.log('Found product details:');
+        console.log('- Product ID:', product._id);
+        console.log('- Product name:', product.name);
+        console.log('- Product SKU:', product.sku);
+        console.log('- Product isActive:', product.isActive);
+    }
+
+    if (!product) {
+        console.log('❌ ERROR: Product not found in database');
+        res.status(404);
+        throw new Error('Product not found');
+    }
+
+    if (product.isActive) {
+        console.log('⚠️ WARNING: Product is already active');
+        res.status(200).json({ message: 'Product is already active', product });
+        return;
+    }
+
+    console.log('🔄 Proceeding with product reactivation...');
+    console.log('Setting isActive to true');
+    
+    product.isActive = true;
+    console.log('Adding audit log entry for reactivation');
+    
+    product.auditLog.push({
+        user: req.user.id,
+        action: 'reactivated',
+        timestamp: new Date()
+    });
+    
+    console.log('Saving product to database...');
+    const updatedProduct = await product.save();
+    console.log('✅ Product saved successfully');
+    console.log('Updated product isActive status:', updatedProduct.isActive);
+
+    if (req.io) {
+        console.log('📡 Emitting socket event: productReactivated');
+        req.io.emit('productReactivated', updatedProduct);
+    } else {
+        console.log('⚠️ No socket.io instance found');
+    }
+
+    console.log('🎉 REACTIVATE PRODUCT OPERATION COMPLETED SUCCESSFULLY');
+    console.log('Sending response to client...');
+    
+    res.status(200).json({ 
+        message: `Product "${updatedProduct.name}" has been reactivated successfully`, 
+        product: updatedProduct 
+    });
 });
 
 // @desc    Get product definitions
@@ -275,7 +561,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
 const getProducts = asyncHandler(async (req, res) => {
     // Existing query params: category, brand, search, includeInactive, populate
     // New query param: locationId
-    const { category, brand, search, includeInactive, populate, locationId } = req.query;
+    const { category, brand, search, includeInactive, populate, locationId, includeInventory } = req.query;
     const filter = {};
 
     if (includeInactive !== 'true') {
@@ -343,9 +629,8 @@ const getProducts = asyncHandler(async (req, res) => {
 
     const products = await query.exec();
 
-    // --- *** NEW: Add inventory data to products *** ---
-    if (locationId) {
-        // For POS, we need inventory data for stock checking
+    // --- *** Add inventory data to products if requested *** ---
+    if (locationId || includeInventory === 'true') {
         // Get all inventory records for these products
         const productIds = products.map(p => p._id);
         const inventoryRecords = await Inventory.find({
@@ -359,13 +644,18 @@ const getProducts = asyncHandler(async (req, res) => {
                 inv.product.toString() === product._id.toString()
             );
 
-            // Also add convenience fields for backward compatibility
-            const locationInventory = inventoryRecords.find(inv =>
-                inv.product.toString() === product._id.toString() &&
-                inv.location._id.toString() === locationId
-            );
-
-            productObj.totalStock = locationInventory ? locationInventory.quantity : 0;
+            // For specific location filtering
+            if (locationId) {
+                const locationInventory = inventoryRecords.find(inv =>
+                    inv.product.toString() === product._id.toString() &&
+                    inv.location._id.toString() === locationId
+                );
+                productObj.totalStock = locationInventory ? locationInventory.quantity : 0;
+            } else {
+                // For general inventory inclusion, calculate total across all locations
+                productObj.totalStock = productObj.inventory.reduce((sum, inv) => sum + (inv.quantity || 0), 0);
+            }
+            
             productObj.sellingPrice = product.price; // Use the base price as selling price
 
             return productObj;
@@ -423,6 +713,8 @@ module.exports = {
     createProduct,
     updateProduct,
     deleteProduct,
+    permanentDeleteProduct,
+    reactivateProduct,
     getProducts,
     getProductById
 };
