@@ -145,3 +145,39 @@ exports.login = async (req, res) => {
         });
     }
 };
+
+// Get current user info
+exports.getMe = async (req, res) => {
+    try {
+        // req.user is already populated by verifyToken middleware with full user document
+        const user = await User.findById(req.user.id)
+                              .populate('locations', 'name type _id isActive')
+                              .select('-password');
+                              
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        
+        if (!user.active) {
+            return res.status(403).json({ success: false, error: 'User account is inactive' });
+        }
+        
+        res.status(200).json({
+            success: true,
+            user: user,
+            // Also send simplified data for compatibility
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            locations: user.locations,
+            active: user.active
+        });
+    } catch (err) {
+        console.error("Get Me Error:", err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get user information'
+        });
+    }
+};
