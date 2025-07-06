@@ -28,6 +28,8 @@ const supplierRoutes = require('./routes/supplierRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const productCategoryRoutes = require('./routes/productCategoryRoutes'); // Add this line
 const purchaseRoutes = require('./routes/purchaseRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const testRoutes = require('./routes/testRoutes');
 
 const app = express();
 const path = require('path');
@@ -48,10 +50,27 @@ const io = socketIo(server, {
 
 // CORS Configuration for Express
 const corsOptions = {
-  origin: process.env.CLIENT_URL || 'http://localhost:4000',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], // Added PATCH method
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: [
+    process.env.CLIENT_URL || 'http://localhost:4000',
+    'http://localhost:3000', // React dev server default
+    'http://localhost:4000', // Custom frontend port
+    'http://127.0.0.1:4000',
+    'http://127.0.0.1:3000'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Cache-Control', 
+    'Pragma', 
+    'Expires',
+    'X-Requested-With'
+  ],
+  credentials: true, // Allow credentials
+  optionsSuccessStatus: 200 // For legacy browser support
 };
+
+console.log('🌐 CORS Configuration:', corsOptions);
 app.use(cors(corsOptions));
 
 // Initialize Socket.io
@@ -151,6 +170,8 @@ app.use('/api/product-categories', productCategoryRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/purchases', purchaseRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/test', testRoutes);
 
 // Protected Route
 app.get('/api/protected',

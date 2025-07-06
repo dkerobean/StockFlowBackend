@@ -15,6 +15,8 @@ router.get('/stock-levels', reportController.getStockLevelReport);
 router.get('/low-stock', reportController.getLowStockReport);
 router.get('/sales-trends', reportController.getSalesTrendReport);
 router.get('/sales', reportController.getSalesReport);
+router.get('/purchases', reportController.getPurchaseReport);
+router.get('/inventory', reportController.getInventoryReport);
 router.get('/income', reportController.getIncomeReport);
 router.get('/expenses', reportController.getExpenseReport);
 router.get('/profit-loss', reportController.getProfitLossReport);

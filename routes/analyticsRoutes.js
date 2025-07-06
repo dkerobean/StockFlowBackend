@@ -29,4 +29,8 @@ router.get('/audit', isManagerOrAdmin, analyticsController.getAuditAnalytics);
 // Export analytics data
 router.get('/export', isManagerOrAdmin, analyticsController.exportAnalytics);
 
+// Dashboard specific endpoints
+router.get('/dashboard/admin', isManagerOrAdmin, analyticsController.getAdminDashboardStats);
+router.get('/dashboard/sales', analyticsController.getSalesDashboardStats);
+
 module.exports = router;

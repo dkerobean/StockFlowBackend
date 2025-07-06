@@ -309,7 +309,7 @@ const adjustInventory = asyncHandler(async (req, res) => {
 // @route   GET /api/inventory/expired
 // @access  Authenticated User (filtered by access)
 const getExpiredInventory = asyncHandler(async (req, res) => {
-    const { search, locationId } = req.query; // Get filter params
+    const { search, locationId, categoryId, status } = req.query; // Get filter params
 
     const now = new Date();
     // Base filter for expired items with stock
@@ -317,6 +317,20 @@ const getExpiredInventory = asyncHandler(async (req, res) => {
         expiryDate: { $lte: now }, // Items that expired before or at this moment
         quantity: { $gt: 0 }       // Only items with positive stock
     };
+
+    // --- Apply Status Filter ---
+    if (status) {
+        if (status === 'recent') {
+            // Recently expired (within last 7 days)
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            filter.expiryDate = { $gte: sevenDaysAgo, $lte: now };
+        } else if (status === 'long') {
+            // Long expired (more than 7 days ago)
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            filter.expiryDate = { $lt: sevenDaysAgo };
+        }
+        // 'null' or 'all' status shows all expired items (default behavior)
+    }
 
     // --- Apply Location Filter ---
     if (locationId) {
@@ -344,22 +358,33 @@ const getExpiredInventory = asyncHandler(async (req, res) => {
          }
     }
 
-    // --- Apply Search Filter (Search Product Name/SKU) ---
+    // --- Apply Product Filters (Search, Category, Brand) ---
     let productIdsToInclude = null;
+    const productFilters = {};
+
+    // Build product filter conditions
     if (search) {
         const searchRegex = { $regex: search, $options: 'i' };
-        // Find products matching the search
-        const matchedProducts = await Product.find({
-            $or: [
-                { name: searchRegex },
-                { sku: searchRegex }
-                // Add other searchable product fields if needed (e.g., barcode)
-            ]
-        }).select('_id'); // Only get the IDs
+        productFilters.$or = [
+            { name: searchRegex },
+            { sku: searchRegex }
+            // Add other searchable product fields if needed (e.g., barcode)
+        ];
+    }
 
+    if (categoryId) {
+        if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+            res.status(400); throw new Error('Invalid Category ID format');
+        }
+        productFilters.category = categoryId;
+    }
+
+    // If any product filters are applied, find matching products
+    if (Object.keys(productFilters).length > 0) {
+        const matchedProducts = await Product.find(productFilters).select('_id');
         productIdsToInclude = matchedProducts.map(p => p._id);
 
-        // If search term exists but no products match, return empty immediately
+        // If filters exist but no products match, return empty immediately
         if (productIdsToInclude.length === 0) {
             return res.json([]);
         }
@@ -371,9 +396,16 @@ const getExpiredInventory = asyncHandler(async (req, res) => {
     // --- Execute Query ---
     const expiredList = await Inventory.find(filter)
         // Populate necessary fields for display
-        .populate('product', 'name sku imageUrl isActive') // Include isActive if needed
+        .populate({
+            path: 'product',
+            select: 'name sku imageUrl isActive category brand',
+            populate: [
+                { path: 'category', select: 'name' },
+                { path: 'brand', select: 'name' }
+            ]
+        })
         .populate('location', 'name type isActive') // Include isActive if needed
-        .sort({ expiryDate: 1 }); // Sort by expiry date
+        .sort({ expiryDate: 1 }); // Default: Recently expired first
 
     res.json(expiredList);
 });

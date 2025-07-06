@@ -417,6 +417,423 @@ function calculatePriorityScore(item) {
   return Math.min(score, 200); // Cap at 200
 }
 
+// Get admin dashboard specific data
+const getAdminDashboardStats = asyncHandler(async (req, res) => {
+  console.log('📊 Generating admin dashboard stats...');
+
+  try {
+    const Sale = require('../models/Sale');
+    const Purchase = require('../models/Purchase');
+    const Expense = require('../models/Expense');
+    const Income = require('../models/Income');
+    const Customer = require('../models/Customer');
+    const Supplier = require('../models/Supplier');
+    const Product = require('../models/Product');
+    const Inventory = require('../models/Inventory');
+    const Invoice = require('../models/Invoice');
+
+    // Get current date and date ranges
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    const last12Months = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+
+    // Parallel database queries for performance
+    const [
+      totalSales,
+      totalPurchases,
+      totalExpenses,
+      totalIncome,
+      customersCount,
+      suppliersCount,
+      purchaseInvoicesCount,
+      salesInvoicesCount,
+      recentProducts,
+      expiredProducts,
+      monthlySalesData,
+      monthlyPurchaseData,
+      lowStockProducts,
+      topSellingProducts
+    ] = await Promise.all([
+      // Financial KPIs
+      Sale.aggregate([
+        { $group: { _id: null, total: { $sum: '$total' }, due: { $sum: '$total' } } }
+      ]),
+      Purchase.aggregate([
+        { $group: { _id: null, total: { $sum: '$total' }, due: { $sum: '$total' } } }
+      ]),
+      Expense.aggregate([
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      Income.aggregate([
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      
+      // Counts
+      Customer.countDocuments(),
+      Supplier.countDocuments(),
+      Invoice.countDocuments({ type: 'purchase' }),
+      Invoice.countDocuments({ type: 'sale' }),
+      
+      // Recent products
+      Product.find({ isActive: true })
+        .populate('category', 'name')
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('name price imageUrl sku'),
+      
+      // Expired products (using createdAt as proxy for expiry)
+      Product.find({ 
+        isActive: true,
+        createdAt: { $lt: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) } // 6 months old
+      })
+        .populate('category', 'name')
+        .limit(10)
+        .select('name sku createdAt imageUrl'),
+      
+      // Monthly sales data (last 12 months)
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: last12Months } } },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' }
+            },
+            totalSales: { $sum: '$total' },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+      ]),
+      
+      // Monthly purchase data (last 12 months)
+      Purchase.aggregate([
+        { $match: { createdAt: { $gte: last12Months } } },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' }
+            },
+            totalPurchases: { $sum: '$total' },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+      ]),
+      
+      // Low stock products
+      Inventory.aggregate([
+        { $match: { quantity: { $lt: 10 } } },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'product',
+            foreignField: '_id',
+            as: 'productDetails'
+          }
+        },
+        { $unwind: '$productDetails' },
+        { $limit: 10 }
+      ]),
+      
+      // Top selling products
+      Sale.aggregate([
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            totalQuantity: { $sum: '$items.quantity' },
+            totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+          }
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'productDetails'
+          }
+        },
+        { $unwind: '$productDetails' },
+        { $sort: { totalQuantity: -1 } },
+        { $limit: 5 }
+      ])
+    ]);
+
+    // Format chart data
+    const chartData = {
+      salesData: Array.from({ length: 12 }, (_, i) => {
+        const month = new Date(last12Months);
+        month.setMonth(month.getMonth() + i);
+        const monthData = monthlySalesData.find(d => 
+          d._id.year === month.getFullYear() && d._id.month === month.getMonth() + 1
+        );
+        return monthData ? monthData.totalSales : 0;
+      }),
+      purchaseData: Array.from({ length: 12 }, (_, i) => {
+        const month = new Date(last12Months);
+        month.setMonth(month.getMonth() + i);
+        const monthData = monthlyPurchaseData.find(d => 
+          d._id.year === month.getFullYear() && d._id.month === month.getMonth() + 1
+        );
+        return monthData ? -Math.abs(monthData.totalPurchases) : 0; // Negative for chart
+      }),
+      labels: Array.from({ length: 12 }, (_, i) => {
+        const month = new Date(last12Months);
+        month.setMonth(month.getMonth() + i);
+        return month.toLocaleDateString('en-US', { month: 'short' });
+      })
+    };
+
+    const dashboardStats = {
+      kpis: {
+        totalPurchaseDue: totalPurchases[0]?.due || 0,
+        totalSalesDue: totalSales[0]?.due || 0,
+        totalSaleAmount: totalSales[0]?.total || 0,
+        totalExpenseAmount: totalExpenses[0]?.total || 0,
+        customersCount,
+        suppliersCount,
+        purchaseInvoicesCount,
+        salesInvoicesCount
+      },
+      chartData,
+      recentProducts: recentProducts.map(product => ({
+        id: product._id,
+        name: product.name,
+        price: product.price,
+        imageUrl: product.imageUrl,
+        sku: product.sku,
+        category: product.category?.name
+      })),
+      expiredProducts: expiredProducts.map(product => ({
+        id: product._id,
+        name: product.name,
+        sku: product.sku,
+        imageUrl: product.imageUrl,
+        manufacturedDate: product.createdAt,
+        expiredDate: new Date(product.createdAt.getTime() + 6 * 30 * 24 * 60 * 60 * 1000) // 6 months after creation
+      })),
+      alerts: {
+        lowStock: lowStockProducts.length,
+        expired: expiredProducts.length
+      },
+      topSellingProducts: topSellingProducts.map(item => ({
+        id: item._id,
+        name: item.productDetails.name,
+        totalQuantity: item.totalQuantity,
+        totalRevenue: item.totalRevenue,
+        imageUrl: item.productDetails.imageUrl
+      }))
+    };
+
+    res.json({
+      success: true,
+      data: dashboardStats,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    console.error('❌ Admin dashboard stats failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate admin dashboard stats',
+      error: error.message
+    });
+  }
+});
+
+// Get sales dashboard specific data
+const getSalesDashboardStats = asyncHandler(async (req, res) => {
+  console.log('💰 Generating sales dashboard stats...');
+
+  try {
+    const Sale = require('../models/Sale');
+    const Customer = require('../models/Customer');
+    const Product = require('../models/Product');
+    const User = require('../models/User');
+
+    const now = new Date();
+    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+    const lastWeek = new Date(startOfWeek.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      weeklyEarnings,
+      totalSales,
+      bestSellers,
+      recentTransactions,
+      topCustomers,
+      salesByCountry,
+      salesTrends,
+      salesByUser
+    ] = await Promise.all([
+      // Weekly earnings
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: startOfWeek } } },
+        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } }
+      ]),
+      
+      // Total sales count
+      Sale.countDocuments(),
+      
+      // Best sellers
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: last30Days } } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            totalQuantity: { $sum: '$items.quantity' },
+            totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+          }
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'productDetails'
+          }
+        },
+        { $unwind: '$productDetails' },
+        { $sort: { totalQuantity: -1 } },
+        { $limit: 5 }
+      ]),
+      
+      // Recent transactions
+      Sale.find()
+        .populate('customer.name', 'name')
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .select('total paymentMethod status createdAt customer items'),
+      
+      // Top customers
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: last30Days } } },
+        {
+          $group: {
+            _id: '$customer.name',
+            totalSpent: { $sum: '$total' },
+            orderCount: { $sum: 1 }
+          }
+        },
+        { $sort: { totalSpent: -1 } },
+        { $limit: 5 }
+      ]),
+      
+      // Sales by country (mock data for demo)
+      Promise.resolve([
+        { country: 'USA', sales: 45.2, orders: 156 },
+        { country: 'UK', sales: 32.1, orders: 87 },
+        { country: 'Canada', sales: 22.7, orders: 64 }
+      ]),
+      
+      // Sales trends (last 7 days)
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: last7Days } } },
+        {
+          $group: {
+            _id: {
+              date: {
+                $dateToString: {
+                  format: '%Y-%m-%d',
+                  date: '$createdAt'
+                }
+              }
+            },
+            totalSales: { $sum: '$total' },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.date': 1 } }
+      ]),
+      
+      // Sales by user/salesperson
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: last30Days } } },
+        {
+          $group: {
+            _id: '$createdBy',
+            totalSales: { $sum: '$total' },
+            orderCount: { $sum: 1 }
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'userDetails'
+          }
+        },
+        { $unwind: '$userDetails' },
+        { $sort: { totalSales: -1 } },
+        { $limit: 5 }
+      ])
+    ]);
+
+    const salesDashboardStats = {
+      kpis: {
+        weeklyEarnings: weeklyEarnings[0]?.total || 0,
+        totalSales,
+        totalOrders: weeklyEarnings[0]?.count || 0,
+        averageOrderValue: weeklyEarnings[0]?.total / (weeklyEarnings[0]?.count || 1) || 0
+      },
+      bestSellers: bestSellers.map(item => ({
+        id: item._id,
+        name: item.productDetails.name,
+        totalQuantity: item.totalQuantity,
+        totalRevenue: item.totalRevenue,
+        imageUrl: item.productDetails.imageUrl,
+        sku: item.productDetails.sku
+      })),
+      recentTransactions: recentTransactions.map(sale => ({
+        id: sale._id,
+        customer: sale.customer?.name || 'Walk-in Customer',
+        total: sale.total,
+        paymentMethod: sale.paymentMethod,
+        status: sale.status,
+        date: sale.createdAt,
+        itemCount: sale.items?.length || 0
+      })),
+      topCustomers: topCustomers.map(customer => ({
+        name: customer._id || 'Unknown Customer',
+        totalSpent: customer.totalSpent,
+        orderCount: customer.orderCount
+      })),
+      salesByCountry,
+      salesTrends: salesTrends.map(trend => ({
+        date: trend._id.date,
+        sales: trend.totalSales,
+        orders: trend.count
+      })),
+      salesByUser: salesByUser.map(user => ({
+        name: user.userDetails.name,
+        totalSales: user.totalSales,
+        orderCount: user.orderCount
+      }))
+    };
+
+    res.json({
+      success: true,
+      data: salesDashboardStats,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    console.error('❌ Sales dashboard stats failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate sales dashboard stats',
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   getDashboardAnalytics,
   getInventoryAnalytics,
@@ -424,5 +841,7 @@ module.exports = {
   getOptimizationRecommendations,
   getRealTimeAlerts,
   getAuditAnalytics,
-  exportAnalytics
+  exportAnalytics,
+  getAdminDashboardStats,
+  getSalesDashboardStats
 };
