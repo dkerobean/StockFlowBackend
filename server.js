@@ -40,14 +40,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Create HTTP server for Socket.io
 const server = http.createServer(app);
 
-// Initialize Socket.io with CORS config
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:4000',
-    methods: ['GET', 'POST']
-  }
-});
-
 // CORS Configuration for Express
 const corsOptions = {
   origin: [
@@ -74,7 +66,7 @@ console.log('🌐 CORS Configuration:', corsOptions);
 app.use(cors(corsOptions));
 
 // Initialize Socket.io
-initSocket(server);
+const io = initSocket(server);
 startScheduler();
 
 // Middleware
@@ -181,17 +173,7 @@ app.get('/api/protected',
   }
 );
 
-// Add this after all routes
-io.on('connection', (socket) => {
-  console.log('New client connected');
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
-
-// Initialize Socket.io with error handling
-initSocket(io);
+// Socket.io is already initialized above via initSocket(server)
 
 // Start notification scheduler with error handling
 try {

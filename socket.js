@@ -4,8 +4,15 @@ let ioInstance = null;
 function initSocket(server) {
   const io = require('socket.io')(server, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:3000',
-      methods: ['GET', 'POST']
+      origin: [
+        process.env.CLIENT_URL || 'http://localhost:4000',
+        'http://localhost:3000', // React dev server default
+        'http://localhost:4000', // Custom frontend port
+        'http://127.0.0.1:4000',
+        'http://127.0.0.1:3000'
+      ],
+      methods: ['GET', 'POST'],
+      credentials: true
     }
   });
 

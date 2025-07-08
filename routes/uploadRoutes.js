@@ -13,15 +13,20 @@ const router = express.Router();
 // --- Configure Multer Storage ---
 // Ensure this path is correct relative to your project root
 const uploadsDir = path.join(__dirname, '..', 'public', 'uploads', 'products');
+const profilesDir = path.join(__dirname, '..', 'public', 'uploads', 'profiles');
 
-// Ensure the directory exists
+// Ensure the directories exist
 try {
     if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
         console.log(`Created directory: ${uploadsDir}`);
     }
+    if (!fs.existsSync(profilesDir)) {
+        fs.mkdirSync(profilesDir, { recursive: true });
+        console.log(`Created directory: ${profilesDir}`);
+    }
 } catch (err) {
-    console.error(`Error creating uploads directory: ${uploadsDir}`, err);
+    console.error(`Error creating uploads directories`, err);
     // Depending on your setup, you might want to prevent the server from starting
     // process.exit(1);
 }
@@ -54,6 +59,26 @@ function checkFileType(file, cb) {
 const upload = multer({
     storage,
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: function (req, file, cb) {
+        checkFileType(file, cb);
+    }
+});
+
+// --- Profile Image Storage Configuration ---
+const profileStorage = multer.diskStorage({
+    destination(req, file, cb) {
+        cb(null, profilesDir); // Save to 'public/uploads/profiles'
+    },
+    filename(req, file, cb) {
+        // Create a unique filename (e.g., profile-userId-timestamp.ext)
+        const userId = req.user ? req.user.id : 'unknown';
+        cb(null, `profile-${userId}-${Date.now()}${path.extname(file.originalname)}`);
+    }
+});
+
+const profileUpload = multer({
+    storage: profileStorage,
+    limits: { fileSize: 2 * 1024 * 1024 }, // 2MB limit for profile images
     fileFilter: function (req, file, cb) {
         checkFileType(file, cb);
     }
@@ -103,5 +128,37 @@ router.post(
     }
 );
 
+// --- Profile Image Upload Route ---
+// POST /api/upload/profile-image
+// Any authenticated user can upload their own profile image
+router.post(
+    '/profile-image',
+    verifyToken,         // Check for valid token and set req.user
+    profileUpload.single('profileImage'), // Process the image upload named 'profileImage'
+    (req, res) => {
+        // If middleware passed and upload successful, req.file will exist
+        if (!req.file) {
+            return res.status(400).json({ message: 'Profile image upload failed or no file provided.' });
+        }
+
+        // Construct the public URL
+        const imageUrl = `/uploads/profiles/${req.file.filename}`;
+
+        res.status(201).json({
+            message: 'Profile image uploaded successfully',
+            imageUrl: imageUrl,
+            filename: req.file.filename
+        });
+    },
+    // Error handling for profile image upload
+    (error, req, res, next) => {
+        if (error instanceof multer.MulterError) {
+            return res.status(400).json({ message: `Profile upload error: ${error.message}` });
+        } else if (error) {
+            return res.status(400).json({ message: error.message || "Profile image upload failed." });
+        }
+        next();
+    }
+);
 
 module.exports = router;

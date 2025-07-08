@@ -655,34 +655,74 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
     const Product = require('../models/Product');
     const User = require('../models/User');
 
+    // Extract date range from query parameters
+    const { startDate, endDate } = req.query;
+    
+    // Set default date ranges
     const now = new Date();
+    const defaultEndDate = endDate ? new Date(endDate) : now;
+    const defaultStartDate = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    
+    // Ensure dates are valid
+    if (defaultStartDate >= defaultEndDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Start date must be before end date'
+      });
+    }
+
+    // Calculate comparison periods for growth metrics
+    const periodDiff = defaultEndDate.getTime() - defaultStartDate.getTime();
+    const comparisonStartDate = new Date(defaultStartDate.getTime() - periodDiff);
+    const comparisonEndDate = new Date(defaultStartDate.getTime());
+    
     const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
     const lastWeek = new Date(startOfWeek.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const [
-      weeklyEarnings,
+      currentPeriodStats,
+      comparisonPeriodStats,
       totalSales,
       bestSellers,
       recentTransactions,
       topCustomers,
-      salesByCountry,
+      salesByCategory,
       salesTrends,
-      salesByUser
+      salesByUser,
+      topPaymentMethod
     ] = await Promise.all([
-      // Weekly earnings
+      // Current period earnings and stats
       Sale.aggregate([
-        { $match: { createdAt: { $gte: startOfWeek } } },
-        { $group: { _id: null, total: { $sum: '$total' }, count: { $sum: 1 } } }
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
+        { 
+          $group: { 
+            _id: null, 
+            totalRevenue: { $sum: '$total' }, 
+            totalOrders: { $sum: 1 },
+            averageOrderValue: { $avg: '$total' }
+          } 
+        }
       ]),
       
-      // Total sales count
+      // Comparison period for growth calculations
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: comparisonStartDate, $lte: comparisonEndDate } } },
+        { 
+          $group: { 
+            _id: null, 
+            totalRevenue: { $sum: '$total' }, 
+            totalOrders: { $sum: 1 }
+          } 
+        }
+      ]),
+      
+      // Total sales count (all time)
       Sale.countDocuments(),
       
-      // Best sellers
+      // Best sellers (filtered by date range)
       Sale.aggregate([
-        { $match: { createdAt: { $gte: last30Days } } },
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
         { $unwind: '$items' },
         {
           $group: {
@@ -704,16 +744,16 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
         { $limit: 5 }
       ]),
       
-      // Recent transactions
-      Sale.find()
+      // Recent transactions (filtered by date range)
+      Sale.find({ createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } })
         .populate('customer.name', 'name')
         .sort({ createdAt: -1 })
         .limit(10)
         .select('total paymentMethod status createdAt customer items'),
       
-      // Top customers
+      // Top customers (filtered by date range)
       Sale.aggregate([
-        { $match: { createdAt: { $gte: last30Days } } },
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
         {
           $group: {
             _id: '$customer.name',
@@ -725,16 +765,44 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
         { $limit: 5 }
       ]),
       
-      // Sales by country (mock data for demo)
-      Promise.resolve([
-        { country: 'USA', sales: 45.2, orders: 156 },
-        { country: 'UK', sales: 32.1, orders: 87 },
-        { country: 'Canada', sales: 22.7, orders: 64 }
+      // Sales by categories (filtered by date range)
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'items.product',
+            foreignField: '_id',
+            as: 'productDetails'
+          }
+        },
+        { $unwind: '$productDetails' },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'productDetails.category',
+            foreignField: '_id',
+            as: 'categoryDetails'
+          }
+        },
+        { $unwind: { path: '$categoryDetails', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$categoryDetails.name',
+            categoryId: { $first: '$categoryDetails._id' },
+            totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
+            totalQuantity: { $sum: '$items.quantity' },
+            orderCount: { $sum: 1 }
+          }
+        },
+        { $sort: { totalRevenue: -1 } },
+        { $limit: 6 }
       ]),
       
-      // Sales trends (last 7 days)
+      // Sales trends (filtered by date range)
       Sale.aggregate([
-        { $match: { createdAt: { $gte: last7Days } } },
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
         {
           $group: {
             _id: {
@@ -752,9 +820,9 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
         { $sort: { '_id.date': 1 } }
       ]),
       
-      // Sales by user/salesperson
+      // Sales by user/salesperson (filtered by date range)
       Sale.aggregate([
-        { $match: { createdAt: { $gte: last30Days } } },
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
         {
           $group: {
             _id: '$createdBy',
@@ -773,15 +841,51 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
         { $unwind: '$userDetails' },
         { $sort: { totalSales: -1 } },
         { $limit: 5 }
+      ]),
+      
+      // Top payment method (new query)
+      Sale.aggregate([
+        { $match: { createdAt: { $gte: defaultStartDate, $lte: defaultEndDate } } },
+        {
+          $group: {
+            _id: '$paymentMethod',
+            count: { $sum: 1 },
+            totalRevenue: { $sum: '$total' }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 1 }
       ])
     ]);
 
+    // Calculate growth percentages
+    const currentStats = currentPeriodStats[0] || { totalRevenue: 0, totalOrders: 0, averageOrderValue: 0 };
+    const comparisonStats = comparisonPeriodStats[0] || { totalRevenue: 0, totalOrders: 0 };
+    
+    const revenueGrowth = comparisonStats.totalRevenue > 0 
+      ? ((currentStats.totalRevenue - comparisonStats.totalRevenue) / comparisonStats.totalRevenue * 100).toFixed(1)
+      : 0;
+    
+    const ordersGrowth = comparisonStats.totalOrders > 0 
+      ? ((currentStats.totalOrders - comparisonStats.totalOrders) / comparisonStats.totalOrders * 100).toFixed(1)
+      : 0;
+
     const salesDashboardStats = {
+      dateRange: {
+        startDate: defaultStartDate,
+        endDate: defaultEndDate,
+        comparisonStartDate,
+        comparisonEndDate
+      },
       kpis: {
-        weeklyEarnings: weeklyEarnings[0]?.total || 0,
-        totalSales,
-        totalOrders: weeklyEarnings[0]?.count || 0,
-        averageOrderValue: weeklyEarnings[0]?.total / (weeklyEarnings[0]?.count || 1) || 0
+        // Meaningful KPIs based on actual data
+        totalRevenue: currentStats.totalRevenue || 0,
+        averageOrderValue: currentStats.averageOrderValue || 0,
+        totalOrders: currentStats.totalOrders || 0,
+        revenueGrowth: parseFloat(revenueGrowth),
+        ordersGrowth: parseFloat(ordersGrowth),
+        topPaymentMethod: topPaymentMethod[0]?._id || 'N/A',
+        topCategory: salesByCategory[0]?._id || 'N/A'
       },
       bestSellers: bestSellers.map(item => ({
         id: item._id,
@@ -805,12 +909,25 @@ const getSalesDashboardStats = asyncHandler(async (req, res) => {
         totalSpent: customer.totalSpent,
         orderCount: customer.orderCount
       })),
-      salesByCountry,
+      salesByCategory: salesByCategory.map(category => ({
+        category: category._id || 'Uncategorized',
+        categoryId: category.categoryId,
+        revenue: category.totalRevenue,
+        quantity: category.totalQuantity,
+        orders: category.orderCount,
+        percentage: 0 // Will be calculated on frontend
+      })),
       salesTrends: salesTrends.map(trend => ({
         date: trend._id.date,
         sales: trend.totalSales,
         orders: trend.count
       })),
+      // Add formatted data for charts
+      chartData: {
+        dates: salesTrends.map(trend => new Date(trend._id.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
+        salesData: salesTrends.map(trend => trend.totalSales),
+        ordersData: salesTrends.map(trend => trend.count)
+      },
       salesByUser: salesByUser.map(user => ({
         name: user.userDetails.name,
         totalSales: user.totalSales,

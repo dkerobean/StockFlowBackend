@@ -171,13 +171,63 @@ exports.getMe = async (req, res) => {
             email: user.email,
             role: user.role,
             locations: user.locations,
-            active: user.active
+            active: user.active,
+            profileImage: user.profileImage // Include profile image URL
         });
     } catch (err) {
         console.error("Get Me Error:", err);
         res.status(500).json({
             success: false,
             error: 'Failed to get user information'
+        });
+    }
+};
+
+// Update user profile
+exports.updateProfile = async (req, res) => {
+    try {
+        const { name, email, profileImage } = req.body;
+        const userId = req.user.id;
+
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+
+        // Update fields that are provided
+        if (name !== undefined) user.name = name;
+        if (email !== undefined) {
+            // Check if email is already in use by another user
+            const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+            if (existingUser) {
+                return res.status(400).json({ success: false, error: 'Email address already in use' });
+            }
+            user.email = email;
+        }
+        if (profileImage !== undefined) user.profileImage = profileImage;
+
+        // Save the updated user
+        await user.save();
+
+        // Return updated user data (excluding password)
+        const updatedUser = await User.findById(userId)
+                                    .populate('locations', 'name type _id isActive')
+                                    .select('-password');
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            user: updatedUser
+        });
+    } catch (err) {
+        console.error("Update Profile Error:", err);
+        if (err.code === 11000) {
+            return res.status(400).json({ success: false, error: 'Email address already in use' });
+        }
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update profile'
         });
     }
 };
