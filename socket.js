@@ -31,6 +31,60 @@ function initSocket(server) {
         console.log(`Client ${socket.id} joined product_definitions room`);
     });
 
+    // --- Join Notification Rooms ---
+    socket.on('subscribeToNotifications', (userData) => {
+      if (userData && userData.userId) {
+        // Join user-specific notification room
+        socket.join(`user_${userData.userId}`);
+        console.log(`Client ${socket.id} joined user notification room: user_${userData.userId}`);
+        
+        // Join role-based notification room
+        if (userData.role) {
+          socket.join(`role_${userData.role}`);
+          console.log(`Client ${socket.id} joined role notification room: role_${userData.role}`);
+        }
+        
+        // Join location-based notification rooms
+        if (userData.locations && Array.isArray(userData.locations)) {
+          userData.locations.forEach(locationId => {
+            socket.join(`location_notifications_${locationId}`);
+            console.log(`Client ${socket.id} joined location notification room: location_notifications_${locationId}`);
+          });
+        }
+        
+        // Join global notifications room
+        socket.join('global_notifications');
+        console.log(`Client ${socket.id} joined global notifications room`);
+        
+        socket.emit('notificationSubscriptionSuccess', { 
+          success: true, 
+          userId: userData.userId,
+          role: userData.role,
+          locations: userData.locations || []
+        });
+      } else {
+        console.warn(`Client ${socket.id} tried to subscribe to notifications without user data.`);
+        socket.emit('notificationSubscriptionError', { 
+          success: false, 
+          error: 'User data is required for notification subscription' 
+        });
+      }
+    });
+
+    socket.on('unsubscribeFromNotifications', (userData) => {
+      if (userData && userData.userId) {
+        socket.leave(`user_${userData.userId}`);
+        if (userData.role) socket.leave(`role_${userData.role}`);
+        if (userData.locations) {
+          userData.locations.forEach(locationId => {
+            socket.leave(`location_notifications_${locationId}`);
+          });
+        }
+        socket.leave('global_notifications');
+        console.log(`Client ${socket.id} unsubscribed from notification rooms`);
+      }
+    });
+
 
     // --- Join Location-Specific Rooms ---
     socket.on('subscribeToLocation', (locationId) => {
@@ -129,6 +183,75 @@ function emitTransferUpdate(transfer) {
 }
 
 
+// --- Enhanced Notification Helper Functions ---
+
+// Emit notification to specific user
+function emitNotificationToUser(userId, notification) {
+  const io = getIO();
+  io.to(`user_${userId}`).emit('notification', notification);
+}
+
+// Emit notification to users with specific role
+function emitNotificationToRole(role, notification) {
+  const io = getIO();
+  io.to(`role_${role}`).emit('notification', notification);
+}
+
+// Emit notification to users at specific location
+function emitNotificationToLocation(locationId, notification) {
+  const io = getIO();
+  io.to(`location_notifications_${locationId}`).emit('notification', notification);
+}
+
+// Emit global notification to all connected users
+function emitGlobalNotification(notification) {
+  const io = getIO();
+  io.to('global_notifications').emit('notification', notification);
+}
+
+// Emit notification based on notification target settings
+function emitNotificationByTarget(notification) {
+  const io = getIO();
+  
+  if (notification.isGlobal) {
+    emitGlobalNotification(notification);
+    return;
+  }
+  
+  // Emit to specific users
+  if (notification.targetUsers && notification.targetUsers.length > 0) {
+    notification.targetUsers.forEach(targetUser => {
+      emitNotificationToUser(targetUser.user, notification);
+    });
+  }
+  
+  // Emit to roles
+  if (notification.targetRoles && notification.targetRoles.length > 0) {
+    notification.targetRoles.forEach(role => {
+      emitNotificationToRole(role, notification);
+    });
+  }
+  
+  // Emit to locations
+  if (notification.targetLocations && notification.targetLocations.length > 0) {
+    notification.targetLocations.forEach(locationId => {
+      emitNotificationToLocation(locationId, notification);
+    });
+  }
+}
+
+// Emit real-time notification count update
+function emitNotificationCountUpdate(userId, unreadCount) {
+  const io = getIO();
+  io.to(`user_${userId}`).emit('notificationCountUpdate', { unreadCount });
+}
+
+// Emit notification marked as read
+function emitNotificationRead(userId, notificationId) {
+  const io = getIO();
+  io.to(`user_${userId}`).emit('notificationRead', { notificationId });
+}
+
 module.exports = {
   initSocket,
   getIO,
@@ -136,6 +259,14 @@ module.exports = {
   emitNewSaleToAll,
   emitNewSaleToLocation,
   emitProductDefinitionUpdate,
-  emitTransferUpdate
+  emitTransferUpdate,
+  // Enhanced notification functions
+  emitNotificationToUser,
+  emitNotificationToRole,
+  emitNotificationToLocation,
+  emitGlobalNotification,
+  emitNotificationByTarget,
+  emitNotificationCountUpdate,
+  emitNotificationRead
   // No longer export the old emitNewSale
 };

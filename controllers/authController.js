@@ -186,7 +186,7 @@ exports.getMe = async (req, res) => {
 // Update user profile
 exports.updateProfile = async (req, res) => {
     try {
-        const { name, email, profileImage } = req.body;
+        const { name, email, profileImage, phone, username, address, password } = req.body;
         const userId = req.user.id;
 
         // Find the user
@@ -206,6 +206,22 @@ exports.updateProfile = async (req, res) => {
             user.email = email;
         }
         if (profileImage !== undefined) user.profileImage = profileImage;
+        if (phone !== undefined) user.phone = phone;
+        if (username !== undefined) user.username = username;
+        if (address !== undefined) {
+            user.address = {
+                street: address.street || user.address?.street || null,
+                city: address.city || user.address?.city || null,
+                state: address.state || user.address?.state || null,
+                country: address.country || user.address?.country || null,
+                postalCode: address.postalCode || user.address?.postalCode || null
+            };
+        }
+        
+        // Update password if provided
+        if (password && password.trim()) {
+            user.password = password; // Will be auto-hashed by pre-save middleware
+        }
 
         // Save the updated user
         await user.save();

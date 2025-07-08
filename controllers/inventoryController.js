@@ -3,6 +3,7 @@ const Inventory = require('../models/Inventory');
 const Product = require('../models/Product');
 const Location = require('../models/Location');
 const mongoose = require('mongoose');
+const enhancedNotificationService = require('../services/enhancedNotificationService');
 
 // @desc    Add a product to a location's inventory (initially often 0)
 // @route   POST /api/inventory
@@ -294,13 +295,31 @@ const adjustInventory = asyncHandler(async (req, res) => {
                                                .populate('product', 'name sku')
                                                .populate('location', 'name type');
 
+    // Create notification for stock adjustment
+    try {
+      await enhancedNotificationService.createStockAdjustmentNotification(
+        populatedInventory,
+        adjustment,
+        req.user,
+        note || 'Manual stock adjustment'
+      );
+
+      // Check for low stock or out of stock after adjustment
+      if (newQuantity === 0) {
+        await enhancedNotificationService.createOutOfStockNotification(populatedInventory);
+      } else if (newQuantity <= populatedInventory.notifyAt) {
+        await enhancedNotificationService.createLowStockNotification(populatedInventory);
+      }
+    } catch (notificationError) {
+      console.error('Error creating adjustment notification:', notificationError);
+      // Don't fail the main operation if notification fails
+    }
 
     // Emit socket event
     if (req.io) {
       req.io.to(`location_${inventory.location.toString()}`).emit('inventoryAdjusted', populatedInventory);
       req.io.to('products').emit('inventoryUpdate', populatedInventory); // General update
     }
-
 
     res.json(populatedInventory);
 });

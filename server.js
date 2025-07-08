@@ -30,6 +30,7 @@ const productCategoryRoutes = require('./routes/productCategoryRoutes'); // Add 
 const purchaseRoutes = require('./routes/purchaseRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const testRoutes = require('./routes/testRoutes');
+const enhancedNotificationRoutes = require('./routes/enhancedNotificationRoutes');
 
 const app = express();
 const path = require('path');
@@ -164,6 +165,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/test', testRoutes);
+app.use('/api/notifications', enhancedNotificationRoutes);
 
 // Protected Route
 app.get('/api/protected',
