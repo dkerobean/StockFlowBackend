@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const Inventory = require('../models/Inventory'); // <-- Import Inventory model
 const Location = require('../models/Location');   // <-- Import Location model for validation
 const mongoose = require('mongoose');
+const barcodeService = require('../services/barcodeService');
 
 // @desc    Create product definition AND optionally its initial inventory record
 // @route   POST /api/products
@@ -11,7 +12,8 @@ const createProduct = asyncHandler(async (req, res) => {
     // --- Destructure ALL data from frontend ---
     const {
         name, description, sku, category, brand, price, barcode, isActive, imageUrl, // Product fields
-        locationId, initialQuantity, expiryDate, minStock, notifyAt // Initial Inventory fields
+        locationId, initialQuantity, expiryDate, minStock, notifyAt, // Initial Inventory fields
+        generateBarcode, barcodeFormat // Barcode generation fields
     } = req.body;
 
     // --- Basic Product Validation ---
@@ -36,6 +38,28 @@ const createProduct = asyncHandler(async (req, res) => {
         if (barcodeExists) {
             res.status(400);
             throw new Error('Product with this Barcode already exists');
+        }
+    }
+
+    // --- Handle Barcode Generation ---
+    let finalBarcode = barcode;
+    let barcodeImageInfo = null;
+    
+    if (generateBarcode && !barcode) {
+        // Generate auto barcode if requested and none provided
+        const tempProductId = new mongoose.Types.ObjectId().toString();
+        const tempSku = sku || `SKU${Date.now()}`;
+        finalBarcode = barcodeService.generateAutoBarcode(tempProductId, tempSku);
+        console.log('Auto-generated barcode:', finalBarcode);
+    }
+    
+    // Validate barcode format if provided
+    if (finalBarcode) {
+        const format = barcodeFormat || 'CODE128';
+        const isValidFormat = barcodeService.validateBarcodeFormat(finalBarcode, format);
+        if (!isValidFormat) {
+            res.status(400);
+            throw new Error(`Invalid barcode format for: ${finalBarcode}`);
         }
     }
 
@@ -80,7 +104,7 @@ const createProduct = asyncHandler(async (req, res) => {
         category, // Assuming frontend sends ObjectId
         brand: brand || undefined, // Assuming frontend sends ObjectId or null/undefined
         price,
-        barcode: barcode ? barcode.trim() : undefined, // Allow sparse
+        barcode: finalBarcode ? finalBarcode.trim() : undefined, // Allow sparse
         isActive: typeof isActive === 'boolean' ? isActive : true,
         createdBy: req.user.id,
         auditLog: [{ user: req.user.id, action: 'created', timestamp: new Date() }]
@@ -88,6 +112,18 @@ const createProduct = asyncHandler(async (req, res) => {
 
     // --- Save Product (Consider Transactions Here for Production) ---
     const createdProduct = await product.save();
+
+    // --- Generate Barcode Image if barcode exists ---
+    if (createdProduct.barcode) {
+        try {
+            const format = barcodeFormat || 'CODE128';
+            barcodeImageInfo = await barcodeService.generateBarcodeImage(createdProduct.barcode, { format });
+            console.log('Barcode image generated:', barcodeImageInfo.url);
+        } catch (barcodeError) {
+            console.error('Error generating barcode image:', barcodeError);
+            // Don't fail product creation if barcode image generation fails
+        }
+    }
 
     // --- Create Initial Inventory Record (IF locationId was provided) ---
     let createdInventory = null;
@@ -155,6 +191,7 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(201).json({
         message: `Product "${createdProduct.name}" created successfully. ${createdInventory ? 'Initial inventory record added.' : 'No initial inventory specified.'}`,
         product: createdProduct,
+        barcodeImage: barcodeImageInfo, // Include barcode image info if generated
         // inventory: createdInventory // Optionally return the inventory object too
     });
 });
@@ -705,9 +742,41 @@ const getProductById = asyncHandler(async (req, res) => {
     }
 });
 
+// @desc    Get product by barcode
+// @route   GET /api/products/barcode/:barcode
+// @access  Public (or Authenticated if preferred)
+const getProductByBarcode = asyncHandler(async (req, res) => {
+    const { barcode } = req.params;
+    const { locationId } = req.query; // Optional: for location-specific stock
 
+    if (!barcode) {
+        res.status(400);
+        throw new Error('Barcode is required');
+    }
 
+    let product = await Product.findOne({ barcode: barcode.trim() }).populate('category', 'name');
 
+    if (!product) {
+        res.status(404);
+        throw new Error('Product not found with this barcode');
+    }
+
+    // If locationId is provided, get stock for that location
+    if (locationId) {
+        if (!mongoose.Types.ObjectId.isValid(locationId)) {
+            res.status(400); throw new Error('Invalid Location ID format');
+        }
+        const inventory = await Inventory.findOne({ product: product._id, location: locationId });
+        product = product.toObject(); // Convert Mongoose document to plain object
+        product.currentStock = inventory ? inventory.quantity : 0;
+    } else {
+        // Otherwise, get total stock across all locations
+        product = product.toObject();
+        product.currentStock = await product.getTotalStock();
+    }
+
+    res.json(product);
+});
 
 module.exports = {
     createProduct,
@@ -716,5 +785,6 @@ module.exports = {
     permanentDeleteProduct,
     reactivateProduct,
     getProducts,
-    getProductById
+    getProductById,
+    getProductByBarcode
 };

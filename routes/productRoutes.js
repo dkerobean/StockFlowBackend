@@ -8,7 +8,8 @@ const {
   permanentDeleteProduct,
   reactivateProduct,
   getProducts,
-  getProductById
+  getProductById,
+  getProductByBarcode
 } = require('../controllers/productController');
 
 // Use isManagerOrAdmin for creation and update
@@ -29,6 +30,9 @@ router.get('/', verifyToken, getProducts);
 
 // GET /api/products/:id
 router.get('/:id', verifyToken, getProductById);
+
+// GET /api/products/barcode/:barcode - Get product by barcode
+router.get('/barcode/:barcode', verifyToken, getProductByBarcode);
 
 
 module.exports = router;

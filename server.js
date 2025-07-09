@@ -31,6 +31,7 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const testRoutes = require('./routes/testRoutes');
 const enhancedNotificationRoutes = require('./routes/enhancedNotificationRoutes');
+const barcodeRoutes = require('./routes/barcodeRoutes');
 
 const app = express();
 const path = require('path');
@@ -166,6 +167,7 @@ app.use('/api/purchases', purchaseRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/notifications', enhancedNotificationRoutes);
+app.use('/api/barcodes', barcodeRoutes);
 
 // Protected Route
 app.get('/api/protected',
